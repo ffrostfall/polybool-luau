@@ -13,20 +13,20 @@
 local sorted_array = {}
 
 function sorted_array.insert_before<T>(array: { T }, node: T, check: (value: T) -> boolean)
-	local length = #array
+	local length: number = #array
 
 	if length < 1 then
 		array[1] = node
 		return node
 	end
 
-	local lowerBound = 1
-	local upperBound = length
+	local lowerBound: number = 1
+	local upperBound: number = length
 
-	local upperBoundChecked = false
+	local upperBoundChecked: boolean = false
 
 	while lowerBound ~= upperBound do
-		local index = math.floor((lowerBound + upperBound) / 2)
+		local index: number = (lowerBound + upperBound) // 2
 
 		if check(array[index]) then
 			upperBound = index
@@ -46,20 +46,20 @@ function sorted_array.insert_before<T>(array: { T }, node: T, check: (value: T) 
 	return node
 end
 
-function sorted_array.findTransition<T>(array: { T }, check: (value: T) -> boolean)
+function sorted_array.findTransition<T>(array: { T }, check: (value: T) -> boolean): number
 	local length = #array
 
 	if length < 1 then
 		return 1
 	end
 
-	local lowerBound = 1
-	local upperBound = length
+	local lowerBound: number = 1
+	local upperBound: number = length
 
-	local upperBoundChecked = false
+	local upperBoundChecked: boolean = false
 
 	while lowerBound ~= upperBound do
-		local index = (lowerBound + upperBound) // 2
+		local index: number = (lowerBound + upperBound) // 2
 
 		if check(array[index]) then
 			upperBound = index

@@ -15,11 +15,12 @@ local function segments(poly: types.Polygon): types.Segments
 	local i = intersector(true)
 
 	for _, reg in poly.regions do
-		i.addRegion(reg)
+		i.add_region(reg)
 	end
 
 	return {
-		segments = i.calculate(poly.inverted),
+		-- overload and im too lazy to deal with the type definitions
+		segments = i.calculate(poly.inverted :: any),
 		inverted = poly.inverted,
 	}
 end

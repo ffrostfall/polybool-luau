@@ -26,16 +26,13 @@ local function reverse_array<T>(t: { T })
 end
 
 local function merge_array<T>(arr1: { T }, arr2: { T }): { T }
-	local c, arr = 0, {}
-	for i = 1, #arr1 do
-		c = c + 1
-		arr[c] = arr1[i]
+	local cloned_array = table.clone(arr1)
+
+	for _, item in arr2 do
+		table.insert(cloned_array, item)
 	end
-	for i = 1, #arr2 do
-		c = c + 1
-		arr[c] = arr2[i]
-	end
-	return arr
+
+	return cloned_array
 end
 
 local function segment_chainer(segments: { types.Segment }): { types.Region }
