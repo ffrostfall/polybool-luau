@@ -1,0 +1,8 @@
+{
+	"languageMode": "strict",
+	"aliases": {
+		"polybool": "../src/",
+		"tests": "../tests/",
+		"vendor": "../vendor/"
+	}
+}
