@@ -1,40 +1,27 @@
---!nonstrict
--- I'm not doing this.
--- This file is going to be an enormous performance eat, but I genuinely can't be asked.
--- I'm rewriting this at 5:50 AM. Maybe when I have an okay amount of sleep I'll get to this.
+--[[
+	Adapted from PolyBool (github.com/voidqk/polybooljs) under the MIT license.
+	(c) 2016 Sean Connelly (@voidqk)
+	
+	Original Lua port by EgoMoose.
+	Refactor and optimisations by Elttob.
+]]
 
--- Update: That decision already costed me half an hour in debugging.
--- this is why we do types, kids.
+--[[
+	The core workhorse of the module, used for resolving intersecting segments.
+]]
 
--- (c) Copyright 2016, Sean Connelly (@voidqk), http:--syntheti.cc
--- MIT License
--- Project Home: https:--github.com/voidqk/polybooljs
--- Converted to Lua by EgoMoose
-
---
--- this is the core work-horse
---
-
+local SortedArray = require("./sorted_array")
 local epsilon = require("./epsilon")
-local linked_list = require("./linked_list")
 local types = require("./types")
 
-local function intersector(selfIntersection: boolean): {
-	addRegion: (region: { vector }) -> (),
-	calculate: ((inverted: boolean) -> { types.Segment }) & (
-		segments1: { types.Segment },
-		inverted1: boolean,
-		segments2: { types.Segment },
-		inverted2: boolean
-	) -> (),
-}
+local function Intersector(selfIntersection)
 	-- selfIntersection is true/false depending on the phase of the overall algorithm
 
 	--
 	-- segment creation
 	--
 
-	local function segment_new(start, finish)
+	local function segmentNew(start, finish): types.Segment
 		return {
 			id = -1,
 			start = start,
@@ -47,7 +34,7 @@ local function intersector(selfIntersection: boolean): {
 		}
 	end
 
-	local function segment_copy(start, finish, seg)
+	local function segmentCopy(start, finish, seg): types.Segment
 		return {
 			id = -1,
 			start = start,
@@ -64,7 +51,7 @@ local function intersector(selfIntersection: boolean): {
 	-- event logic
 	--
 
-	local event_root = linked_list.create()
+	local event_root = {}
 
 	local function eventCompare(p1_isStart, p1_1, p1_2, p2_isStart, p2_1, p2_2)
 		-- compare the selected points first
@@ -79,21 +66,33 @@ local function intersector(selfIntersection: boolean): {
 		end
 
 		if p1_isStart ~= p2_isStart then -- if one is a start and the other isn't...
-			return if p1_isStart then 1 else -1 -- favor the one that isn't the start
+			-- favor the one that isn't the start
+			if p1_isStart then
+				return 1
+			else
+				return -1
+			end
 		end
 
 		-- otherwise, we'll have to calculate which one is below the other manually
-		return if epsilon.point_above_or_on_line(
-				p1_2,
-				if p2_isStart then p2_1 else p2_2, -- order matters
-				if p2_isStart then p2_2 else p2_1
-			)
-			then 1
-			else -1
+		if p2_isStart then
+			-- order matters
+			if epsilon.point_above_or_on_line(p1_2, p2_1, p2_2) then
+				return 1
+			else
+				return -1
+			end
+		else
+			if epsilon.point_above_or_on_line(p1_2, p2_2, p2_1) then
+				return 1
+			else
+				return -1
+			end
+		end
 	end
 
 	local function eventAdd(ev, other_pt)
-		event_root.insertBefore(ev, function(here)
+		SortedArray.insert_before(event_root, ev, function(here)
 			-- should ev be inserted before here?
 			local comp = eventCompare(
 				ev.isStart,
@@ -108,27 +107,27 @@ local function intersector(selfIntersection: boolean): {
 	end
 
 	local function eventAddSegmentStart(seg, primary)
-		local ev_start = linked_list.node({
+		local ev_start = {
 			isStart = true,
 			point = seg.start,
 			seg = seg,
 			primary = primary,
 			other = nil,
 			status = nil,
-		})
+		}
 		eventAdd(ev_start, seg.finish)
 		return ev_start
 	end
 
 	local function eventAddSegmentEnd(ev_start, seg, primary)
-		local ev_end = linked_list.node({
+		local ev_end = {
 			isStart = false,
 			point = seg.finish,
 			seg = seg,
 			primary = primary,
 			other = ev_start,
 			status = nil,
-		})
+		}
 		ev_start.other = ev_end
 		eventAdd(ev_end, ev_start.point)
 	end
@@ -144,25 +143,26 @@ local function intersector(selfIntersection: boolean): {
 		--   (start)------------(finish)    to:
 		--   (start)---(finish)
 
-		ev.other.remove()
+		table.remove(event_root, table.find(event_root, ev.other))
 		ev.seg.finish = finish
 		ev.other.point = finish
 		eventAdd(ev.other, ev.point)
 	end
 
 	local function eventDivide(ev, point)
-		local ns = segment_copy(point, ev.seg.finish, ev.seg)
+		local ns = segmentCopy(point, ev.seg.finish, ev.seg)
 		eventUpdateEnd(ev, point)
 		return eventAddSegment(ns, ev.primary)
 	end
 
-	local function calculate(primaryPolyInverted, secondaryPolyInverted)
+	local function calculate(primaryPolyInverted: boolean, secondaryPolyInverted: boolean)
 		-- if selfIntersection is true then there is no secondary polygon, so that isn't used
+
 		--
 		-- status logic
 		--
 
-		local status_root = linked_list.create()
+		local status_root = {}
 
 		local function statusCompare(ev1, ev2)
 			local a1 = ev1.seg.start
@@ -172,18 +172,19 @@ local function intersector(selfIntersection: boolean): {
 
 			if epsilon.points_collinear(a1, b1, b2) then
 				if epsilon.points_collinear(a2, b1, b2) then
-					return 1 --eventCompare(true, a1, a2, true, b1, b2);
+					return 1 --eventCompare(true, a1, a2, true, b1, b2)
 				end
-				return if epsilon.point_above_or_on_line(a2, b1, b2) then 1 else -1
+				if epsilon.point_above_or_on_line(a2, b1, b2) then
+					return 1
+				else
+					return -1
+				end
 			end
-			return if epsilon.point_above_or_on_line(a1, b1, b2) then 1 else -1
-		end
-
-		local function statusFindSurrounding(ev)
-			return status_root.findTransition(function(here)
-				local comp = statusCompare(ev, here.ev)
-				return comp > 0
-			end)
+			if epsilon.point_above_or_on_line(a1, b1, b2) then
+				return 1
+			else
+				return -1
+			end
 		end
 
 		local function checkIntersection(ev1, ev2)
@@ -198,7 +199,7 @@ local function intersector(selfIntersection: boolean): {
 
 			local i = epsilon.lines_intersect(a1, a2, b1, b2)
 
-			if not i then
+			if i == false then
 				-- segments are parallel or coincident
 
 				-- if points aren't collinear, then the segments are parallel, so no intersections
@@ -220,14 +221,6 @@ local function intersector(selfIntersection: boolean): {
 
 				local a1_between = not a1_equ_b1 and epsilon.point_between(a1, b1, b2)
 				local a2_between = not a2_equ_b2 and epsilon.point_between(a2, b1, b2)
-
-				-- handy for debugging:
-				-- buildLog.log({
-				--	a1_equ_b1: a1_equ_b1,
-				--	a2_equ_b2: a2_equ_b2,
-				--	a1_between: a1_between,
-				--	a2_between: a2_between
-				-- });
 
 				if a1_equ_b1 then
 					if a2_between then
@@ -290,28 +283,23 @@ local function intersector(selfIntersection: boolean): {
 		-- main event loop
 		--
 		local segments = {}
-		while not event_root.isEmpty() do
-			local ev = event_root.getHead()
+		while event_root[1] ~= nil do
+			local ev = event_root[1]
 
 			if ev.isStart then
-				local surrounding = statusFindSurrounding(ev)
-				local above = surrounding.before and surrounding.before.ev or nil
-				local below = surrounding.after and surrounding.after.ev or nil
+				local transitionIndex = SortedArray.findTransition(status_root, function(here)
+					local comp = statusCompare(ev, here.ev)
+					return comp > 0
+				end)
 
-				local function checkBothIntersections()
-					if above then
-						local eve = checkIntersection(ev, above)
-						if eve then
-							return eve
-						end
-					end
-					if below then
-						return checkIntersection(ev, below)
-					end
-					return false
-				end
+				local transitionBefore = status_root[transitionIndex - 1]
+				local transitionAfter = status_root[transitionIndex]
 
-				local eve = checkBothIntersections()
+				local above = transitionBefore and transitionBefore.ev or nil
+				local below = transitionAfter and transitionAfter.ev or nil
+
+				local eve = (above and checkIntersection(ev, above))
+					or (below and checkIntersection(ev, below))
 				if eve then
 					-- ev and eve are equal
 					-- we'll keep eve and throw away ev
@@ -340,11 +328,11 @@ local function intersector(selfIntersection: boolean): {
 						eve.seg.other_fill = ev.seg.my_fill
 					end
 
-					ev.other.remove()
-					ev.remove()
+					table.remove(event_root, table.find(event_root, ev.other))
+					table.remove(event_root, table.find(event_root, ev))
 				end
 
-				if event_root.getHead() ~= ev then
+				if event_root[1] ~= ev then
 					-- something was inserted before us in the event queue, so loop back around and
 					-- process it before continuing
 					continue
@@ -389,9 +377,11 @@ local function intersector(selfIntersection: boolean): {
 						if not below then
 							-- if nothing is below us, then we're inside if the other polygon is
 							-- inverted
-							inside = if ev.primary
-								then secondaryPolyInverted
-								else primaryPolyInverted
+							if ev.primary then
+								inside = secondaryPolyInverted
+							else
+								inside = primaryPolyInverted
+							end
 						else -- otherwise, something is below us
 							-- so copy the below segment's other polygon's above
 							if ev.primary == below.primary then
@@ -408,7 +398,9 @@ local function intersector(selfIntersection: boolean): {
 				end
 
 				-- insert the status and remember it for later removal
-				ev.other.status = surrounding.insert(linked_list.node({ ev = ev }))
+				local newStatus = { ev = ev }
+				table.insert(status_root, transitionIndex, newStatus)
+				ev.other.status = newStatus
 			else
 				local st = ev.status
 
@@ -418,14 +410,19 @@ local function intersector(selfIntersection: boolean): {
 					)
 				end
 
+				local st_index = table.find(status_root, st)
+
 				-- removing the status will create two new adjacent edges, so we'll need to check
 				-- for those
-				if status_root.exists(st.prev) and status_root.exists(st.next) then
-					checkIntersection(st.prev.ev, st.next.ev)
+				if st_index and st_index > 1 and st_index < #status_root then
+					checkIntersection(
+						status_root[st_index - 1].ev,
+						status_root[st_index + 1].ev
+					)
 				end
 
 				-- remove the status
-				st.remove()
+				table.remove(status_root, st_index)
 
 				-- if we've reached this point, we've calculated everything there is to know, so
 				-- save the segment for reporting
@@ -439,7 +436,7 @@ local function intersector(selfIntersection: boolean): {
 			end
 
 			-- remove the event and continue
-			event_root.getHead().remove()
+			table.remove(event_root, 1)
 		end
 
 		return segments
@@ -449,16 +446,23 @@ local function intersector(selfIntersection: boolean): {
 	if not selfIntersection then
 		-- performing combination of polygons, so only deal with already-processed segments
 		return {
-			calculate = function(segments1, inverted1, segments2, inverted2)
+			calculate = function(
+				segments1: { types.Segment },
+				inverted1: boolean,
+				segments2: { types.Segment },
+				inverted2: boolean
+			)
 				-- segmentsX come from the self-intersection API, or this API
 				-- invertedX is whether we treat that list of segments as an inverted polygon or not
 				-- returns segments that can be used for further operations
-				for _, seg in next, segments1 do
-					eventAddSegment(segment_copy(seg.start, seg.finish, seg), true)
+				for _, seg in segments1 do
+					eventAddSegment(segmentCopy(seg.start, seg.finish, seg), true)
 				end
-				for _, seg in next, segments2 do
-					eventAddSegment(segment_copy(seg.start, seg.finish, seg), false)
+
+				for _, seg in segments2 do
+					eventAddSegment(segmentCopy(seg.start, seg.finish, seg), false)
 				end
+
 				return calculate(inverted1, inverted2)
 			end,
 		}
@@ -466,31 +470,31 @@ local function intersector(selfIntersection: boolean): {
 
 	-- otherwise, performing self-intersection, so deal with regions
 	return {
-		addRegion = function(region)
+		addRegion = function(region: types.Region)
 			-- regions are a list of points:
 			--  [ [0, 0], [100, 0], [50, 100] ]
 			-- you can add multiple regions before running calculate
-			local pt1
+
+			local pt1 = nil
 			local pt2 = region[#region]
-			for i = 1, #region do
+
+			for _, point in region do
 				pt1 = pt2
-				pt2 = region[i]
+				pt2 = point
 
 				local forward = epsilon.points_compare(pt1, pt2)
+
 				if forward == 0 then -- points are equal, so we have a zero-length segment
 					continue -- just skip it
+				elseif forward < 0 then
+					eventAddSegment(segmentNew(pt1, pt2), true)
+				else
+					eventAddSegment(segmentNew(pt2, pt1), true)
 				end
-
-				eventAddSegment(
-					segment_new(
-						if forward < 0 then pt1 else pt2,
-						if forward < 0 then pt2 else pt1
-					),
-					true
-				)
 			end
 		end,
-		calculate = function()
+
+		calculate = function(inverted: boolean)
 			-- is the polygon inverted?
 			-- returns segments
 			return calculate(inverted, false)
@@ -498,4 +502,4 @@ local function intersector(selfIntersection: boolean): {
 	}
 end
 
-return intersector
+return Intersector
