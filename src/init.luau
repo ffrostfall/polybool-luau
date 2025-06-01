@@ -90,7 +90,6 @@ local function operate(
 	local seg2 = segments(poly2)
 	local comb = combine(seg1, seg2)
 	local seg3 = selector(comb)
-	print(seg3)
 
 	return polygon(seg3)
 end
