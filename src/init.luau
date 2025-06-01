@@ -82,38 +82,50 @@ local function polygon(segments: types.Segments): types.Polygon
 	}
 end
 
-local function operate(
-	poly1: types.Polygon,
-	poly2: types.Polygon,
-	selector: (combined: types.CombinedSegments) -> types.Segments
-)
+-- helper functions for common operations
+local function union(poly1: types.Polygon, poly2: types.Polygon)
 	local seg1 = segments(poly1)
 	local seg2 = segments(poly2)
 	local comb = combine(seg1, seg2)
-	local seg3 = selector(comb)
+	local seg3 = selectUnion(comb)
 
 	return polygon(seg3)
 end
 
--- helper functions for common operations
-local function union(poly1, poly2)
-	return operate(poly1, poly2, selectUnion)
+local function intersect(poly1: types.Polygon, poly2: types.Polygon)
+	local seg1 = segments(poly1)
+	local seg2 = segments(poly2)
+	local comb = combine(seg1, seg2)
+	local seg3 = selectIntersect(comb)
+
+	return polygon(seg3)
 end
 
-local function intersect(poly1, poly2)
-	return operate(poly1, poly2, selectIntersect)
+local function difference(poly1: types.Polygon, poly2: types.Polygon)
+	local seg1 = segments(poly1)
+	local seg2 = segments(poly2)
+	local comb = combine(seg1, seg2)
+	local seg3 = selectDifference(comb)
+
+	return polygon(seg3)
 end
 
-local function difference(poly1, poly2)
-	return operate(poly1, poly2, selectDifference)
+local function differenceRev(poly1: types.Polygon, poly2: types.Polygon)
+	local seg1 = segments(poly1)
+	local seg2 = segments(poly2)
+	local comb = combine(seg1, seg2)
+	local seg3 = selectDifferenceRev(comb)
+
+	return polygon(seg3)
 end
 
-local function differenceRev(poly1, poly2)
-	return operate(poly1, poly2, selectDifferenceRev)
-end
+local function xor(poly1: types.Polygon, poly2: types.Polygon)
+	local seg1 = segments(poly1)
+	local seg2 = segments(poly2)
+	local comb = combine(seg1, seg2)
+	local seg3 = selectXor(comb)
 
-local function xor(poly1, poly2)
-	return operate(poly1, poly2, selectXor)
+	return polygon(seg3)
 end
 
 return {
@@ -126,4 +138,7 @@ return {
 	difference = difference,
 	difference_rev = differenceRev,
 	xor = xor,
+
+	union_selector = selectUnion,
+	difference_selector = selectDifference,
 }

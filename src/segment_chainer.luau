@@ -9,11 +9,23 @@
 local epsilon = require("./epsilon")
 local types = require("./types")
 
+local MATCH_TEMPLATE: Match = {
+	index = 1,
+	matches_head = false,
+	matches_pt1 = false,
+}
+
 type Match = {
 	index: number,
 	matches_head: boolean,
 	matches_pt1: boolean,
 }
+
+local epsilon_points_same = epsilon.points_same
+
+local function new_match(): Match
+	return table.clone(MATCH_TEMPLATE)
+end
 
 local function reverse_array<T>(t: { T })
 	local n = #t
@@ -40,25 +52,13 @@ local function segment_chainer(segments: { types.Segment }): { types.Region }
 	local regions: { { vector } } = {}
 
 	for _, seg in segments do
-		local pt1 = seg.start
-		local pt2 = seg.finish
-		if epsilon.points_same(pt1, pt2) then
-			error(
-				"PolyBool: Warning: Zero-length segment detected; your epsilon is probably too small or too large"
-			)
-		end
+		local point1, point2 = seg.start, seg.finish
+		assert(not epsilon.points_same(point1, point2), "zero-length segment")
 
 		-- search for two chains that this segment matches
-		local first_match: Match = {
-			index = 1, -- zero?
-			matches_head = false,
-			matches_pt1 = false,
-		}
-		local second_match: Match = {
-			index = 1, -- zero?
-			matches_head = false,
-			matches_pt1 = false,
-		}
+		local first_match: Match = new_match()
+		local second_match: Match = new_match()
+
 		local next_match: Match? = first_match
 		local function set_match(index, matches_head, matches_pt1)
 			-- return true if we've matched twice
@@ -75,25 +75,24 @@ local function segment_chainer(segments: { types.Segment }): { types.Region }
 			return true -- we've matched twice, we're done here
 		end
 
-		for i = 1, #chains do
-			local chain = chains[i]
+		for index, chain in chains do
 			local head = chain[1]
 			local tail = chain[#chain]
 
-			if epsilon.points_same(head, pt1) then
-				if set_match(i, true, true) then
+			if epsilon_points_same(head, point1) then
+				if set_match(index, true, true) then
 					break
 				end
-			elseif epsilon.points_same(head, pt2) then
-				if set_match(i, true, false) then
+			elseif epsilon_points_same(head, point2) then
+				if set_match(index, true, false) then
 					break
 				end
-			elseif epsilon.points_same(tail, pt1) then
-				if set_match(i, false, true) then
+			elseif epsilon_points_same(tail, point1) then
+				if set_match(index, false, true) then
 					break
 				end
-			elseif epsilon.points_same(tail, pt2) then
-				if set_match(i, false, false) then
+			elseif epsilon_points_same(tail, point2) then
+				if set_match(index, false, false) then
 					break
 				end
 			end
@@ -101,7 +100,7 @@ local function segment_chainer(segments: { types.Segment }): { types.Region }
 
 		if next_match == first_match then
 			-- we didn't match anything, so create a new chain
-			table.insert(chains, { pt1, pt2 })
+			table.insert(chains, { point1, point2 })
 			continue
 		end
 
@@ -112,14 +111,15 @@ local function segment_chainer(segments: { types.Segment }): { types.Region }
 			-- chain into a loop
 
 			local index = first_match.index
-			local pt = if first_match.matches_pt1 then pt2 else pt1 -- if we matched pt1, then we add pt2, etc
+			local pt = if first_match.matches_pt1 then point2 else point1 -- if we matched pt1, then we add pt2, etc
 			local addToHead = first_match.matches_head -- if we matched at head, then add to the head
 
 			local chain = chains[index]
-			local grow = if addToHead then chain[1] else chain[#chain]
-			local grow2 = if addToHead then chain[2] else chain[#chain - 1]
-			local oppo = if addToHead then chain[#chain] else chain[1]
-			local oppo2 = if addToHead then chain[#chain - 1] else chain[2]
+			local chain_length = #chain
+			local grow = if addToHead then chain[1] else chain[chain_length]
+			local grow2 = if addToHead then chain[2] else chain[chain_length - 1]
+			local oppo = if addToHead then chain[chain_length] else chain[1]
+			local oppo2 = if addToHead then chain[chain_length - 1] else chain[2]
 
 			if epsilon.points_collinear(grow2, grow, pt) then
 				-- grow isn't needed because it's directly between grow2 and pt:
@@ -129,10 +129,11 @@ local function segment_chainer(segments: { types.Segment }): { types.Region }
 				else
 					table.remove(chain)
 				end
+
 				grow = grow2 -- old grow is gone... new grow is what grow2 was
 			end
 
-			if epsilon.points_same(oppo, pt) then
+			if epsilon_points_same(oppo, pt) then
 				-- we're closing the loop, so remove chain from chains
 				table.remove(chains, index)
 
@@ -163,11 +164,11 @@ local function segment_chainer(segments: { types.Segment }): { types.Region }
 
 		-- otherwise, we matched two chains, so we need to combine those chains together
 
-		local function reverseChain(index: number)
+		local function reverse_chain(index: number)
 			reverse_array(chains[index]) -- gee, that's easy
 		end
 
-		local function appendChain(index1: number, index2: number)
+		local function append_chain(index1: number, index2: number)
 			-- index1 gets index2 appended to it, and index2 is removed
 			local chain1 = chains[index1]
 			local chain2 = chains[index2]
@@ -193,47 +194,43 @@ local function segment_chainer(segments: { types.Segment }): { types.Region }
 			table.remove(chains, index2)
 		end
 
-		local F = first_match.index
-		local S = second_match.index
+		local f = first_match.index
+		local s = second_match.index
 
-		local reverseF = #chains[F] < #chains[S] -- reverse the shorter chain, if needed
+		local reverseF = #chains[f] < #chains[s] -- reverse the shorter chain, if needed
 		if first_match.matches_head then
 			if second_match.matches_head then
 				if reverseF then
 					-- <<<< F <<<< --- >>>> S >>>>
-					reverseChain(F)
+					reverse_chain(f)
 					-- >>>> F >>>> --- >>>> S >>>>
-					appendChain(F, S)
+					append_chain(f, s)
 				else
 					-- <<<< F <<<< --- >>>> S >>>>
-					reverseChain(S)
+					reverse_chain(s)
 					-- <<<< F <<<< --- <<<< S <<<<   logically same as:
 					-- >>>> S >>>> --- >>>> F >>>>
-					appendChain(S, F)
+					append_chain(s, f)
 				end
 			else
 				-- <<<< F <<<< --- <<<< S <<<<   logically same as:
 				-- >>>> S >>>> --- >>>> F >>>>
-				appendChain(S, F)
+				append_chain(s, f)
 			end
+		elseif second_match.matches_head then
+			-- >>>> F >>>> --- >>>> S >>>>
+			append_chain(f, s)
+		elseif reverseF then
+			-- >>>> F >>>> --- <<<< S <<<<
+			reverse_chain(f)
+			-- <<<< F <<<< --- <<<< S <<<<   logically same as:
+			-- >>>> S >>>> --- >>>> F >>>>
+			append_chain(s, f)
 		else
-			if second_match.matches_head then
-				-- >>>> F >>>> --- >>>> S >>>>
-				appendChain(F, S)
-			else
-				if reverseF then
-					-- >>>> F >>>> --- <<<< S <<<<
-					reverseChain(F)
-					-- <<<< F <<<< --- <<<< S <<<<   logically same as:
-					-- >>>> S >>>> --- >>>> F >>>>
-					appendChain(S, F)
-				else
-					-- >>>> F >>>> --- <<<< S <<<<
-					reverseChain(S)
-					-- >>>> F >>>> --- >>>> S >>>>
-					appendChain(F, S)
-				end
-			end
+			-- >>>> F >>>> --- <<<< S <<<<
+			reverse_chain(s)
+			-- >>>> F >>>> --- >>>> S >>>>
+			append_chain(f, s)
 		end
 	end
 

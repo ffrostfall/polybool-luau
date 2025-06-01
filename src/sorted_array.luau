@@ -40,13 +40,13 @@ function sorted_array.insert_before<T>(array: { T }, node: T, check: (value: T) 
 	if upperBoundChecked or check(array[upperBound]) then
 		table.insert(array, upperBound, node)
 	else
-		array[length + 1] = node
+		table.insert(array, node)
 	end
 
 	return node
 end
 
-function sorted_array.findTransition<T>(array: { T }, check: (value: T) -> boolean): number
+function sorted_array.find_transition<T>(array: { T }, check: (value: T) -> boolean): number
 	local length = #array
 
 	if length < 1 then

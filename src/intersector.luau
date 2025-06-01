@@ -27,7 +27,6 @@ type WeirdAssEvType = {
 
 local function segment_new(start: vector, finish: vector): types.Segment
 	return {
-		id = -1,
 		start = start,
 		finish = finish,
 		my_fill = {
@@ -40,7 +39,6 @@ end
 
 local function segment_copy(start: vector, finish: vector, seg: types.Segment): types.Segment
 	return {
-		id = -1,
 		start = start,
 		finish = finish,
 		my_fill = {
@@ -51,128 +49,269 @@ local function segment_copy(start: vector, finish: vector, seg: types.Segment): 
 	}
 end
 
+local function status_compare(ev1: WeirdAssEvType, ev2: WeirdAssEvType)
+	local a1 = ev1.seg.start
+	local a2 = ev1.seg.finish
+	local b1 = ev2.seg.start
+	local b2 = ev2.seg.finish
+
+	if epsilon.points_collinear(a1, b1, b2) then
+		if epsilon.points_collinear(a2, b1, b2) then
+			return 1 --eventCompare(true, a1, a2, true, b1, b2)
+		end
+		if epsilon.point_above_or_on_line(a2, b1, b2) then
+			return 1
+		else
+			return -1
+		end
+	end
+	if epsilon.point_above_or_on_line(a1, b1, b2) then
+		return 1
+	else
+		return -1
+	end
+end
+
+local function event_compare(
+	p1_is_start: boolean,
+	p1_1: vector,
+	p1_2: vector,
+	p2_is_start: boolean,
+	p2_1: vector,
+	p2_2: vector
+)
+	-- compare the selected points first
+	local comp = epsilon.points_compare(p1_1, p2_1)
+	if comp ~= 0 then
+		return comp
+	end
+	-- the selected points are the same
+
+	if epsilon.points_same(p1_2, p2_2) then -- if the non-selected points are the same too...
+		return 0 -- then the segments are equal
+	end
+
+	if p1_is_start ~= p2_is_start then -- if one is a start and the other isn't...
+		-- favor the one that isn't the start
+		if p1_is_start then
+			return 1
+		else
+			return -1
+		end
+	end
+
+	-- otherwise, we'll have to calculate which one is below the other manually
+	if p2_is_start then
+		-- order matters
+		if epsilon.point_above_or_on_line(p1_2, p2_1, p2_2) then
+			return 1
+		else
+			return -1
+		end
+	else
+		if epsilon.point_above_or_on_line(p1_2, p2_2, p2_1) then
+			return 1
+		else
+			return -1
+		end
+	end
+end
+
+local function event_add(
+	event_root: { WeirdAssEvType | Status },
+	event: WeirdAssEvType,
+	other_pt: vector
+)
+	sorted_array.insert_before(event_root, event, function(iter_event: WeirdAssEvType)
+		-- should ev be inserted before here?
+
+		assert(iter_event.other) -- idk lol
+
+		local comp = event_compare(
+			event.is_start,
+			event.point,
+			other_pt,
+			iter_event.is_start,
+			iter_event.point,
+			iter_event.other.point
+		)
+		return comp < 0
+	end)
+end
+
+local function event_add_segment_start(
+	event_root: { WeirdAssEvType | Status },
+	seg: types.Segment,
+	primary: boolean
+): WeirdAssEvType
+	local ev_start: WeirdAssEvType = {
+		t = "ev",
+		is_start = true,
+		point = seg.start,
+		seg = seg,
+		primary = primary,
+		other = nil,
+		status = nil,
+	}
+	event_add(event_root, ev_start, seg.finish)
+	return ev_start
+end
+
+local function event_add_segment_end(
+	event_root: { WeirdAssEvType | Status },
+	ev_start: WeirdAssEvType,
+	seg: types.Segment,
+	primary: boolean
+)
+	local ev_end: WeirdAssEvType = {
+		t = "ev",
+		is_start = false,
+		point = seg.finish,
+		seg = seg,
+		primary = primary,
+		other = ev_start,
+		status = nil,
+	}
+	ev_start.other = ev_end
+	event_add(event_root, ev_end, ev_start.point)
+end
+
+local function event_add_segment(
+	event_root: { WeirdAssEvType | Status },
+	seg: types.Segment,
+	primary: boolean
+)
+	local ev_start = event_add_segment_start(event_root, seg, primary)
+	event_add_segment_end(event_root, ev_start, seg, primary)
+	return ev_start
+end
+
+local function event_update_end(
+	event_root: { WeirdAssEvType | Status },
+	ev: WeirdAssEvType,
+	finish: vector
+)
+	-- slides an finish backwards
+	--   (start)------------(finish)    to:
+	--   (start)---(finish)
+	assert(ev.other)
+
+	table.remove(event_root, table.find(event_root, ev.other))
+	ev.seg.finish = finish
+	ev.other.point = finish
+	event_add(event_root, ev.other, ev.point)
+end
+
+local function event_divide(
+	event_root: { WeirdAssEvType | Status },
+	ev: WeirdAssEvType,
+	point: vector
+)
+	local ns = segment_copy(point, ev.seg.finish, ev.seg)
+	event_update_end(event_root, ev, point)
+	return event_add_segment(event_root, ns, ev.primary)
+end
+
+local function check_intersection(
+	event_root: { WeirdAssEvType | Status },
+	ev1: WeirdAssEvType,
+	ev2: WeirdAssEvType
+): false | WeirdAssEvType
+	-- returns the segment equal to ev1, or false if nothing equal
+
+	local seg1 = ev1.seg
+	local seg2 = ev2.seg
+	local a1 = seg1.start
+	local a2 = seg1.finish
+	local b1 = seg2.start
+	local b2 = seg2.finish
+
+	local i = epsilon.lines_intersect(a1, a2, b1, b2)
+
+	if i == false then
+		-- segments are parallel or coincident
+
+		-- if points aren't collinear, then the segments are parallel, so no intersections
+		if not epsilon.points_collinear(a1, a2, b1) then
+			return false
+		end
+		-- otherwise, segments are on top of each other somehow (aka coincident)
+
+		if epsilon.points_same(a1, b2) or epsilon.points_same(a2, b1) then
+			return false -- segments touch at endpoints... no intersection
+		end
+
+		local a1_equ_b1 = epsilon.points_same(a1, b1)
+		local a2_equ_b2 = epsilon.points_same(a2, b2)
+
+		if a1_equ_b1 and a2_equ_b2 then
+			return ev2 -- segments are exactly equal
+		end
+
+		local a1_between = not a1_equ_b1 and epsilon.point_between(a1, b1, b2)
+		local a2_between = not a2_equ_b2 and epsilon.point_between(a2, b1, b2)
+
+		if a1_equ_b1 then
+			if a2_between then
+				--  (a1)---(a2)
+				--  (b1)----------(b2)
+				event_divide(event_root, ev2, a2)
+			else
+				--  (a1)----------(a2)
+				--  (b1)---(b2)
+				event_divide(event_root, ev1, b2)
+			end
+			return ev2
+		elseif a1_between then
+			if not a2_equ_b2 then
+				-- make a2 equal to b2
+				if a2_between then
+					--         (a1)---(a2)
+					--  (b1)-----------------(b2)
+					event_divide(event_root, ev2, a2)
+				else
+					--         (a1)----------(a2)
+					--  (b1)----------(b2)
+					event_divide(event_root, ev1, b2)
+				end
+			end
+
+			--         (a1)---(a2)
+			--  (b1)----------(b2)
+			event_divide(event_root, ev2, a1)
+		end
+	else
+		-- otherwise, lines intersect at i.point, which may or may not be between the endpoints
+
+		-- is A divided between its endpoints? (exclusive)
+		if i.along_a == 0 then
+			if i.along_b == -1 then -- yes, at exactly b1
+				event_divide(event_root, ev1, b1)
+			elseif i.along_b == 0 then -- yes, somewhere between B's endpoints
+				event_divide(event_root, ev1, i.point)
+			elseif i.along_b == 1 then -- yes, at exactly b2
+				event_divide(event_root, ev1, b2)
+			end
+		end
+
+		-- is B divided between its endpoints? (exclusive)
+		if i.along_b == 0 then
+			if i.along_a == -1 then -- yes, at exactly a1
+				event_divide(event_root, ev2, a1)
+			elseif i.along_a == 0 then -- yes, somewhere between A's endpoints (exclusive)
+				event_divide(event_root, ev2, i.point)
+			elseif i.along_a == 1 then -- yes, at exactly a2
+				event_divide(event_root, ev2, a2)
+			end
+		end
+	end
+
+	return false
+end
+
 -- selfIntersection is true/false depending on the phase of the overall algorithm
 local function Intersector(self_intersection: boolean)
 	local event_root: { WeirdAssEvType | Status } = {}
-
-	local function event_compare(
-		p1_is_start: boolean,
-		p1_1: vector,
-		p1_2: vector,
-		p2_is_start: boolean,
-		p2_1: vector,
-		p2_2: vector
-	)
-		-- compare the selected points first
-		local comp = epsilon.points_compare(p1_1, p2_1)
-		if comp ~= 0 then
-			return comp
-		end
-		-- the selected points are the same
-
-		if epsilon.points_same(p1_2, p2_2) then -- if the non-selected points are the same too...
-			return 0 -- then the segments are equal
-		end
-
-		if p1_is_start ~= p2_is_start then -- if one is a start and the other isn't...
-			-- favor the one that isn't the start
-			if p1_is_start then
-				return 1
-			else
-				return -1
-			end
-		end
-
-		-- otherwise, we'll have to calculate which one is below the other manually
-		if p2_is_start then
-			-- order matters
-			if epsilon.point_above_or_on_line(p1_2, p2_1, p2_2) then
-				return 1
-			else
-				return -1
-			end
-		else
-			if epsilon.point_above_or_on_line(p1_2, p2_2, p2_1) then
-				return 1
-			else
-				return -1
-			end
-		end
-	end
-
-	local function event_add(event: WeirdAssEvType, other_pt: vector)
-		sorted_array.insert_before(event_root, event, function(iter_event: WeirdAssEvType)
-			-- should ev be inserted before here?
-
-			assert(iter_event.other) -- idk lol
-
-			local comp = event_compare(
-				event.is_start,
-				event.point,
-				other_pt,
-				iter_event.is_start,
-				iter_event.point,
-				iter_event.other.point
-			)
-			return comp < 0
-		end)
-	end
-
-	local function event_add_segment_start(seg: types.Segment, primary: boolean): WeirdAssEvType
-		local ev_start: WeirdAssEvType = {
-			t = "ev",
-			is_start = true,
-			point = seg.start,
-			seg = seg,
-			primary = primary,
-			other = nil,
-			status = nil,
-		}
-		event_add(ev_start, seg.finish)
-		return ev_start
-	end
-
-	local function event_add_segment_end(
-		ev_start: WeirdAssEvType,
-		seg: types.Segment,
-		primary: boolean
-	)
-		local ev_end: WeirdAssEvType = {
-			t = "ev",
-			is_start = false,
-			point = seg.finish,
-			seg = seg,
-			primary = primary,
-			other = ev_start,
-			status = nil,
-		}
-		ev_start.other = ev_end
-		event_add(ev_end, ev_start.point)
-	end
-
-	local function event_add_segment(seg: types.Segment, primary: boolean)
-		local ev_start = event_add_segment_start(seg, primary)
-		event_add_segment_end(ev_start, seg, primary)
-		return ev_start
-	end
-
-	local function event_update_end(ev: WeirdAssEvType, finish: vector)
-		-- slides an finish backwards
-		--   (start)------------(finish)    to:
-		--   (start)---(finish)
-		assert(ev.other)
-
-		table.remove(event_root, table.find(event_root, ev.other))
-		ev.seg.finish = finish
-		ev.other.point = finish
-		event_add(ev.other, ev.point)
-	end
-
-	local function event_divide(ev: WeirdAssEvType, point: vector)
-		local ns = segment_copy(point, ev.seg.finish, ev.seg)
-		event_update_end(ev, point)
-		return event_add_segment(ns, ev.primary)
-	end
 
 	local function calculate(
 		primary_poly_inverted: boolean,
@@ -183,124 +322,6 @@ local function Intersector(self_intersection: boolean)
 		-- status logic
 		local status_root = {}
 
-		local function status_compare(ev1: WeirdAssEvType, ev2: WeirdAssEvType)
-			local a1 = ev1.seg.start
-			local a2 = ev1.seg.finish
-			local b1 = ev2.seg.start
-			local b2 = ev2.seg.finish
-
-			if epsilon.points_collinear(a1, b1, b2) then
-				if epsilon.points_collinear(a2, b1, b2) then
-					return 1 --eventCompare(true, a1, a2, true, b1, b2)
-				end
-				if epsilon.point_above_or_on_line(a2, b1, b2) then
-					return 1
-				else
-					return -1
-				end
-			end
-			if epsilon.point_above_or_on_line(a1, b1, b2) then
-				return 1
-			else
-				return -1
-			end
-		end
-
-		local function check_intersection(
-			ev1: WeirdAssEvType,
-			ev2: WeirdAssEvType
-		): false | WeirdAssEvType
-			-- returns the segment equal to ev1, or false if nothing equal
-
-			local seg1 = ev1.seg
-			local seg2 = ev2.seg
-			local a1 = seg1.start
-			local a2 = seg1.finish
-			local b1 = seg2.start
-			local b2 = seg2.finish
-
-			local i = epsilon.lines_intersect(a1, a2, b1, b2)
-
-			if i == false then
-				-- segments are parallel or coincident
-
-				-- if points aren't collinear, then the segments are parallel, so no intersections
-				if not epsilon.points_collinear(a1, a2, b1) then
-					return false
-				end
-				-- otherwise, segments are on top of each other somehow (aka coincident)
-
-				if epsilon.points_same(a1, b2) or epsilon.points_same(a2, b1) then
-					return false -- segments touch at endpoints... no intersection
-				end
-
-				local a1_equ_b1 = epsilon.points_same(a1, b1)
-				local a2_equ_b2 = epsilon.points_same(a2, b2)
-
-				if a1_equ_b1 and a2_equ_b2 then
-					return ev2 -- segments are exactly equal
-				end
-
-				local a1_between = not a1_equ_b1 and epsilon.point_between(a1, b1, b2)
-				local a2_between = not a2_equ_b2 and epsilon.point_between(a2, b1, b2)
-
-				if a1_equ_b1 then
-					if a2_between then
-						--  (a1)---(a2)
-						--  (b1)----------(b2)
-						event_divide(ev2, a2)
-					else
-						--  (a1)----------(a2)
-						--  (b1)---(b2)
-						event_divide(ev1, b2)
-					end
-					return ev2
-				elseif a1_between then
-					if not a2_equ_b2 then
-						-- make a2 equal to b2
-						if a2_between then
-							--         (a1)---(a2)
-							--  (b1)-----------------(b2)
-							event_divide(ev2, a2)
-						else
-							--         (a1)----------(a2)
-							--  (b1)----------(b2)
-							event_divide(ev1, b2)
-						end
-					end
-
-					--         (a1)---(a2)
-					--  (b1)----------(b2)
-					event_divide(ev2, a1)
-				end
-			else
-				-- otherwise, lines intersect at i.point, which may or may not be between the endpoints
-
-				-- is A divided between its endpoints? (exclusive)
-				if i.along_a == 0 then
-					if i.along_b == -1 then -- yes, at exactly b1
-						event_divide(ev1, b1)
-					elseif i.along_b == 0 then -- yes, somewhere between B's endpoints
-						event_divide(ev1, i.point)
-					elseif i.along_b == 1 then -- yes, at exactly b2
-						event_divide(ev1, b2)
-					end
-				end
-
-				-- is B divided between its endpoints? (exclusive)
-				if i.along_b == 0 then
-					if i.along_a == -1 then -- yes, at exactly a1
-						event_divide(ev2, a1)
-					elseif i.along_a == 0 then -- yes, somewhere between A's endpoints (exclusive)
-						event_divide(ev2, i.point)
-					elseif i.along_a == 1 then -- yes, at exactly a2
-						event_divide(ev2, a2)
-					end
-				end
-			end
-			return false
-		end
-
 		-- main event loop
 		local segments = {}
 		while event_root[1] ~= nil do
@@ -309,7 +330,7 @@ local function Intersector(self_intersection: boolean)
 			assert(ev.t == "ev")
 
 			if ev.is_start then
-				local transitionIndex = sorted_array.findTransition(
+				local transitionIndex = sorted_array.find_transition(
 					status_root,
 					function(here: WeirdAssEvType | Status)
 						-- idk how this works
@@ -328,8 +349,8 @@ local function Intersector(self_intersection: boolean)
 					then transition_after.ev
 					else nil
 
-				local eve = (above and check_intersection(ev, above))
-					or (below and check_intersection(ev, below))
+				local eve = (above and check_intersection(event_root, ev, above))
+					or (below and check_intersection(event_root, ev, below))
 				if eve then
 					-- ev and eve are equal
 					-- we'll keep eve and throw away ev
@@ -448,6 +469,7 @@ local function Intersector(self_intersection: boolean)
 				-- for those
 				if st_index and st_index > 1 and st_index < #status_root then
 					check_intersection(
+						event_root,
 						status_root[st_index - 1].ev,
 						status_root[st_index + 1].ev
 					)
@@ -490,11 +512,11 @@ local function Intersector(self_intersection: boolean)
 			-- invertedX is whether we treat that list of segments as an inverted polygon or not
 			-- returns segments that can be used for further operations
 			for _, seg in segments1 do
-				event_add_segment(segment_copy(seg.start, seg.finish, seg), true)
+				event_add_segment(event_root, segment_copy(seg.start, seg.finish, seg), true)
 			end
 
 			for _, seg in segments2 do
-				event_add_segment(segment_copy(seg.start, seg.finish, seg), false)
+				event_add_segment(event_root, segment_copy(seg.start, seg.finish, seg), false)
 			end
 
 			return calculate(inverted1, inverted2)
@@ -521,9 +543,9 @@ local function Intersector(self_intersection: boolean)
 			if forward == 0 then -- points are equal, so we have a zero-length segment
 				continue -- just skip it
 			elseif forward < 0 then
-				event_add_segment(segment_new(point1 :: vector, point2), true)
+				event_add_segment(event_root, segment_new(point1 :: vector, point2), true)
 			else
-				event_add_segment(segment_new(point2, point1 :: vector), true)
+				event_add_segment(event_root, segment_new(point2, point1 :: vector), true)
 			end
 		end
 	end

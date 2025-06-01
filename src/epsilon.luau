@@ -8,7 +8,7 @@
 --
 -- zero is defined to be between (-epsilon, epsilon) exclusive
 --
-local EPSILON = 0.0000001
+local EPSILON = 0.000001
 
 local function point_above_or_on_line(point: vector, left: vector, right: vector): boolean
 	local left_x, left_y = left.x, left.y
@@ -42,25 +42,22 @@ local function point_between(point: vector, left: vector, right: vector)
 	return true
 end
 
-local function points_same_x(point1: vector, point2: vector): boolean
-	return math.abs(point1.x - point2.x) < EPSILON
-end
-
-local function points_same_y(point1: vector, point2: vector): boolean
-	return math.abs(point1.y - point2.y) < EPSILON
-end
-
 local function points_same(p1: vector, p2: vector): boolean
-	return points_same_x(p1, p2) and points_same_y(p1, p2)
+	return vector.magnitude(p1 - p2) < EPSILON
 end
 
-local function points_compare(p1: vector, p2: vector)
-	-- returns -1 if p1 is smaller, 1 if p2 is smaller, 0 if equal
-	if points_same_x(p1, p2) then
-		return if points_same_y(p1, p2) then 0 elseif p1.y < p2.y then -1 else 1
+local function points_compare(point1: vector, point2: vector): number
+	local magnitude = vector.magnitude(point1 - point2)
+
+	if magnitude <= EPSILON then
+		return 0
 	end
 
-	return if p1.x < p2.x then -1 else 1
+	if math.abs(point1.x - point2.x) < EPSILON then
+		return if point1.y < point2.y then -1 else 1
+	end
+
+	return if point1.x < point2.x then -1 else 1
 end
 
 local function points_collinear(pt1: vector, pt2: vector, pt3: vector)
@@ -118,11 +115,10 @@ local function lines_intersect(
 	local ret = {
 		along_a = 0,
 		along_b = 0,
-		point = vector.create(a0.x + a * adx, a0.y + a * ady, 0),
+		point = vector.create(a0.x + a * adx, a0.y + a * ady),
 	}
 
 	-- categorize where intersection point is along A and B
-
 	if a <= -EPSILON then
 		ret.along_a = -2
 	elseif a < EPSILON then
@@ -156,5 +152,6 @@ return {
 	point_above_or_on_line = point_above_or_on_line,
 	points_same = points_same,
 	point_between = point_between,
+
 	points_compare = points_compare,
 }
