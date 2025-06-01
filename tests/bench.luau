@@ -14,7 +14,7 @@ local box1 = polybool.segments({
 	inverted = false,
 })
 
-local box2 = polybool.segments({
+local box2_polygon = {
 	regions = {
 		{
 			vector.create(-2.5, -2.5),
@@ -24,12 +24,33 @@ local box2 = polybool.segments({
 		},
 	},
 	inverted = false,
-})
+}
+local box2_segments = polybool.segments(box2_polygon)
 
-local combined = polybool.combine(box1, box2)
+local combined = polybool.combine(box1, box2_segments)
+
+local prepopulated_segments_1 = {}
+local prepopulated_segments_2 = {}
+
+for i = 1, 100 do
+	table.insert(prepopulated_segments_1, box2_segments)
+	table.insert(prepopulated_segments_2, box1)
+end
 
 BENCH("difference operation", function()
 	for i = 1, 100 do
 		polybool.difference_selector(combined)
+	end
+end)
+
+BENCH("segmenting polygons", function()
+	for i = 1, 100 do
+		polybool.segments(box2_polygon)
+	end
+end)
+
+BENCH("combining segments", function()
+	for i = 1, 100 do
+		polybool.combine(prepopulated_segments_1[i], prepopulated_segments_2[i])
 	end
 end)
