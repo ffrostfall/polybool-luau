@@ -1,0 +1,94 @@
+--!nonstrict
+-- (c) Copyright 2016, Sean Connelly (@voidqk), http:--syntheti.cc
+-- MIT License
+-- Project Home: https:--github.com/voidqk/polybooljs
+-- Converted to Lua by EgoMoose
+
+--
+-- simple linked list implementation that allows you to traverse down nodes and save positions
+--
+export type Node<T> = {}
+
+export type LinkedList<T> = {}
+
+local linked_list = {}
+
+function linked_list.create()
+	local my
+	my = {
+		root = { root = true, next = nil },
+		exists = function(node)
+			if node == nil or node == my.root then
+				return false
+			end
+			return true
+		end,
+		isEmpty = function()
+			return my.root.next == nil
+		end,
+		getHead = function()
+			return my.root.next
+		end,
+		insertBefore = function(node, check)
+			local last = my.root
+			local here = my.root.next
+			while here ~= nil do
+				if check(here) then
+					node.prev = here.prev
+					node.next = here
+					here.prev.next = node
+					here.prev = node
+					return
+				end
+				last = here
+				here = here.next
+			end
+			last.next = node
+			node.prev = last
+			node.next = nil
+		end,
+		findTransition = function(check)
+			local prev = my.root
+			local here = my.root.next
+			while here ~= nil do
+				if check(here) then
+					break
+				end
+				prev = here
+				here = here.next
+			end
+			return {
+				before = if prev == my.root then nil else prev,
+				after = here,
+				insert = function(node)
+					node.prev = prev
+					node.next = here
+					prev.next = node
+					if here ~= nil then
+						here.prev = node
+					end
+					return node
+				end,
+			}
+		end,
+	}
+	return my
+end
+
+-- Fuck typechecking this shit, I'm done. ?????????????????
+function linked_list.node<T>(data: any)
+	data.prev = nil
+	data.next = nil
+	data.remove = function()
+		data.prev.next = data.next
+		if data.next then
+			-- im sad
+			(data.next :: any).prev = data.prev
+		end
+		data.prev = nil
+		data.next = nil
+	end
+	return data
+end
+
+return linked_list

@@ -1,0 +1,10 @@
+{
+	"luau-lsp.fflags.enableNewSolver": true,
+	"luau-lsp.platform.type": "standard",
+	"luau-lsp.sourcemap.enabled": false,
+	"luau-lsp.diagnostics.workspace": true,
+	
+	"prettier.useTabs": true,
+
+	"files.eol": "\n",
+}
