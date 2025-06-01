@@ -75,7 +75,6 @@ function linked_list.create()
 	return my
 end
 
--- Fuck typechecking this shit, I'm done. ?????????????????
 function linked_list.node<T>(data: any)
 	data.prev = nil
 	data.next = nil
