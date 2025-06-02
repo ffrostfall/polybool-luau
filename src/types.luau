@@ -1,4 +1,4 @@
-export type Fill = { above: boolean, below: boolean }
+export type Fill = { above: boolean?, below: boolean? }
 
 export type Region = { vector }
 

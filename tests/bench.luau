@@ -26,7 +26,6 @@ local box2_polygon = {
 	},
 	inverted = false,
 }
-print("Hola")
 local box2_segments = polybool.segments(box2_polygon)
 
 local combined = polybool.combine(box1, box2_segments)

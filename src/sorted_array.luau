@@ -12,7 +12,12 @@
 
 local sorted_array = {}
 
-function sorted_array.insert_before<T>(array: { T }, node: T, check: (value: T) -> boolean)
+function sorted_array.insert_before<T, U...>(
+	array: { T },
+	node: T,
+	check: (value: T, U...) -> boolean,
+	...: U...
+)
 	local length: number = #array
 
 	if length < 1 then
@@ -27,7 +32,7 @@ function sorted_array.insert_before<T>(array: { T }, node: T, check: (value: T) 
 
 	while lowerBound ~= upperBound do
 		local index: number = (lowerBound + upperBound) // 2
-		local checked = check(array[index])
+		local checked = check(array[index], ...)
 
 		upperBoundChecked = checked
 		if checked then
@@ -37,7 +42,7 @@ function sorted_array.insert_before<T>(array: { T }, node: T, check: (value: T) 
 		end
 	end
 
-	if upperBoundChecked or check(array[upperBound]) then
+	if upperBoundChecked or check(array[upperBound], ...) then
 		table.insert(array, upperBound, node)
 	else
 		table.insert(array, node)
@@ -46,7 +51,11 @@ function sorted_array.insert_before<T>(array: { T }, node: T, check: (value: T) 
 	return node
 end
 
-function sorted_array.find_transition<T>(array: { T }, check: (value: T) -> boolean): number
+function sorted_array.find_transition<T, U...>(
+	array: { T },
+	check: (value: T, U...) -> boolean,
+	...: U...
+): number
 	local length = #array
 
 	if length < 1 then
@@ -60,17 +69,18 @@ function sorted_array.find_transition<T>(array: { T }, check: (value: T) -> bool
 
 	while lowerBound ~= upperBound do
 		local index: number = (lowerBound + upperBound) // 2
+		local checked = check(array[index], ...)
 
-		if check(array[index]) then
+		if checked then
 			upperBound = index
-			upperBoundChecked = true
 		else
 			lowerBound = index + 1
-			upperBoundChecked = false
 		end
+
+		upperBoundChecked = checked
 	end
 
-	if upperBoundChecked or check(array[upperBound]) then
+	if upperBoundChecked or check(array[upperBound], ...) then
 		return upperBound
 	else
 		return length + 1
