@@ -14,9 +14,8 @@ local epsilon = require("./epsilon")
 local sorted_array = require("./sorted_array")
 local types = require("./types")
 
-type Status = { t: "status", event: Event }
+type Status = { event: Event }
 type Event = {
-	t: "event",
 	is_start: boolean,
 	point: vector,
 	seg: types.Segment,
@@ -30,8 +29,8 @@ local function segment_new(start: vector, finish: vector): types.Segment
 		start = start,
 		finish = finish,
 		my_fill = {
-			above = nil, -- is there fill above us?
-			below = nil, -- is there fill below us?
+			above = false, -- is there fill above us?
+			below = false, -- is there fill below us?
 		},
 		other_fill = nil,
 	}
@@ -50,26 +49,20 @@ local function segment_copy(start: vector, finish: vector, seg: types.Segment): 
 end
 
 local function status_compare(ev1: Event, ev2: Event)
-	local a1 = ev1.seg.start
-	local a2 = ev1.seg.finish
-	local b1 = ev2.seg.start
-	local b2 = ev2.seg.finish
+	local ev1_seg, ev2_seg = ev1.seg, ev2.seg
+	local a1 = ev1_seg.start
+	local b1 = ev2_seg.start
+	local b2 = ev2_seg.finish
 
 	if epsilon.points_collinear(a1, b1, b2) then
-		if epsilon.points_collinear(a2, b1, b2) then
-			return 1 --eventCompare(true, a1, a2, true, b1, b2)
-		end
-		if epsilon.point_above_or_on_line(a2, b1, b2) then
-			return 1
-		else
-			return -1
-		end
+		local a2 = ev1_seg.finish
+
+		return if epsilon.points_collinear(a2, b1, b2)
+			then 1
+			else epsilon.point_above_or_on_line(a2, b1, b2)
 	end
-	if epsilon.point_above_or_on_line(a1, b1, b2) then
-		return 1
-	else
-		return -1
-	end
+
+	return (epsilon.point_above_or_on_line(a1, b1, b2))
 end
 
 local function event_compare(
@@ -93,55 +86,34 @@ local function event_compare(
 
 	if p1_is_start ~= p2_is_start then -- if one is a start and the other isn't...
 		-- favor the one that isn't the start
-		if p1_is_start then
-			return 1
-		else
-			return -1
-		end
+		return if p1_is_start then 1 else -1
 	end
 
 	-- otherwise, we'll have to calculate which one is below the other manually
-	if p2_is_start then
-		-- order matters
-		if epsilon.point_above_or_on_line(p1_2, p2_1, p2_2) then
-			return 1
-		else
-			return -1
-		end
-	else
-		if epsilon.point_above_or_on_line(p1_2, p2_2, p2_1) then
-			return 1
-		else
-			return -1
-		end
-	end
+	return if p2_is_start
+		then epsilon.point_above_or_on_line(p1_2, p2_1, p2_2)
+		else epsilon.point_above_or_on_line(p1_2, p2_2, p2_1)
 end
 
-local function event_add(event_root: { Event | Status }, event: Event, other_pt: vector)
+local function event_add(event_root: { Event }, event: Event, other_pt: vector)
 	sorted_array.insert_before(event_root, event, function(iter_event: Event)
-		-- should event be inserted before here?
-
-		assert(iter_event.other) -- idk lol
-
-		local comp = event_compare(
+		return event_compare(
 			event.is_start,
 			event.point,
 			other_pt,
 			iter_event.is_start,
 			iter_event.point,
-			iter_event.other.point
-		)
-		return comp < 0
+			(iter_event.other :: any).point
+		) < 0
 	end)
 end
 
 local function event_add_segment_start(
-	event_root: { Event | Status },
+	event_root: { Event },
 	seg: types.Segment,
 	primary: boolean
 ): Event
 	local ev_start: Event = {
-		t = "event",
 		is_start = true,
 		point = seg.start,
 		seg = seg,
@@ -154,13 +126,12 @@ local function event_add_segment_start(
 end
 
 local function event_add_segment_end(
-	event_root: { Event | Status },
+	event_root: { Event },
 	ev_start: Event,
 	seg: types.Segment,
 	primary: boolean
 )
 	local ev_end: Event = {
-		t = "event",
 		is_start = false,
 		point = seg.finish,
 		seg = seg,
@@ -172,17 +143,13 @@ local function event_add_segment_end(
 	event_add(event_root, ev_end, ev_start.point)
 end
 
-local function event_add_segment(
-	event_root: { Event | Status },
-	seg: types.Segment,
-	primary: boolean
-)
+local function event_add_segment(event_root: { Event }, seg: types.Segment, primary: boolean)
 	local ev_start = event_add_segment_start(event_root, seg, primary)
 	event_add_segment_end(event_root, ev_start, seg, primary)
 	return ev_start
 end
 
-local function event_update_end(event_root: { Event | Status }, event: Event, finish: vector)
+local function event_update_end(event_root: { Event }, event: Event, finish: vector)
 	-- slides an finish backwards
 	--   (start)------------(finish)    to:
 	--   (start)---(finish)
@@ -194,17 +161,13 @@ local function event_update_end(event_root: { Event | Status }, event: Event, fi
 	event_add(event_root, event.other, event.point)
 end
 
-local function event_divide(event_root: { Event | Status }, event: Event, point: vector)
+local function event_divide(event_root: { Event }, event: Event, point: vector)
 	local ns = segment_copy(point, event.seg.finish, event.seg)
 	event_update_end(event_root, event, point)
 	return (event_add_segment(event_root, ns, event.primary))
 end
 
-local function check_intersection(
-	event_root: { Event | Status },
-	ev1: Event,
-	ev2: Event
-): false | Event
+local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event): false | Event
 	-- returns the segment equal to ev1, or false if nothing equal
 
 	local seg1 = ev1.seg
@@ -236,7 +199,6 @@ local function check_intersection(
 			return ev2 -- segments are exactly equal
 		end
 
-		local a1_between = not a1_equ_b1 and epsilon.point_between(a1, b1, b2)
 		local a2_between = not a2_equ_b2 and epsilon.point_between(a2, b1, b2)
 
 		if a1_equ_b1 then
@@ -250,7 +212,7 @@ local function check_intersection(
 				event_divide(event_root, ev1, b2)
 			end
 			return ev2
-		elseif a1_between then
+		elseif not a1_equ_b1 and epsilon.point_between(a1, b1, b2) then
 			if not a2_equ_b2 then
 				-- make a2 equal to b2
 				if a2_between then
@@ -298,36 +260,33 @@ end
 local function calculate(
 	primary_poly_inverted: boolean,
 	secondary_poly_inverted: boolean,
-	event_root: { Event | Status },
-	self_intersection
+	event_root: { Event },
+	self_intersection: boolean
 ): { types.Segment }
 	-- if selfIntersection is true then there is no secondary polygon, so that isn't used
 
 	-- status logic
-	local status_root = {}
+	local status_root: { Status } = {}
 
 	-- main event loop
 	local segments = {}
 	while event_root[1] ~= nil do
-		local event = event_root[1]
-
-		assert(event.t == "event")
+		local event: Event = event_root[1]
 
 		if event.is_start then
 			local transitionIndex = sorted_array.find_transition(
 				status_root,
-				function(here: Event | Status)
+				function(here: Event)
 					-- idk how this works
-					local comp = status_compare(event, (here :: any).event)
-					return comp > 0
+					return status_compare(event, (here :: any).event) > 0
 				end
 			)
 
 			local transition_before = status_root[transitionIndex - 1]
 			local transition_after = status_root[transitionIndex]
 
-			local above: Event? = if transition_before then transition_before.event else nil
-			local below: Event? = if transition_after then transition_after.event else nil
+			local above: Event? = transition_before and transition_before.event
+			local below: Event? = transition_after and transition_after.event
 
 			local eve = (above and check_intersection(event_root, event, above))
 				or (below and check_intersection(event_root, event, below))
@@ -339,7 +298,7 @@ local function calculate(
 
 				if self_intersection then
 					local toggle: boolean = false -- are we a toggling edge?
-					if event.seg.my_fill.below == nil then
+					if not event.seg.my_fill.below then
 						toggle = true
 					else
 						toggle = event.seg.my_fill.above ~= event.seg.my_fill.below
@@ -350,7 +309,7 @@ local function calculate(
 					-- the bottom -- this will cause the above fill flag to toggle
 					if toggle then
 						-- This might break things
-						eve.seg.my_fill.above = nil
+						eve.seg.my_fill.above = false
 					end
 				else
 					-- merge two segments that belong to different polygons
@@ -372,71 +331,52 @@ local function calculate(
 
 			-- calculate fill flags
 			if self_intersection then
+				local my_fill = event.seg.my_fill
+
 				local toggle -- are we a toggling edge?
-				if event.seg.my_fill.below == nil then -- if we are a new segment...
+				if not my_fill.below then -- if we are a new segment...
 					toggle = true -- then we toggle
 				else -- we are a segment that has previous knowledge from a division
-					toggle = event.seg.my_fill.above ~= event.seg.my_fill.below -- calculate toggle
+					toggle = my_fill.above ~= my_fill.below -- calculate toggle
 				end
 
 				-- next, calculate whether we are filled below us
 				if not below then -- if nothing is below us...
 					-- we are filled below us if the polygon is inverted
-					event.seg.my_fill.below = primary_poly_inverted
+					my_fill.below = primary_poly_inverted
 				else
 					-- otherwise, we know the answer -- it's the same if whatever is below
 					-- us is filled above it
-					event.seg.my_fill.below = below.seg.my_fill.above
+					my_fill.below = below.seg.my_fill.above
 				end
 
 				-- since now we know if we're filled below us, we can calculate whether
 				-- we're filled above us by applying toggle to whatever is below us
-				if toggle then
-					event.seg.my_fill.above = not event.seg.my_fill.below
-				else
-					event.seg.my_fill.above = event.seg.my_fill.below
-				end
-			else
-				-- now we fill in any missing transition information, since we are all-knowing
-				-- at this point
+				my_fill.above = if toggle then not my_fill.below else my_fill.below
+			elseif not event.seg.other_fill then
+				-- if we don't have other information, then we need to figure out if we're
+				-- inside the other polygon
+				local inside = below
+					and (
+						if event.primary == below.primary
+							then below.seg.other_fill.above
+							else below.seg.my_fill.above
+					)
 
-				if event.seg.other_fill == nil then
-					-- if we don't have other information, then we need to figure out if we're
-					-- inside the other polygon
-					local inside
-					if not below then
-						-- if nothing is below us, then we're inside if the other polygon is
-						-- inverted
-
-						inside = if event.primary
-							then secondary_poly_inverted
-							else primary_poly_inverted
-					elseif event.primary == below.primary then
-						assert(below.seg.other_fill)
-						inside = below.seg.other_fill.above
-					else
-						inside = below.seg.my_fill.above
-					end
-					event.seg.other_fill = {
-						above = inside,
-						below = inside,
-					}
-				end
+				event.seg.other_fill = {
+					above = inside,
+					below = inside,
+				}
 			end
 
 			-- insert the status and remember it for later removal
-			local new_status = { event = event } :: Status
+			local new_status = { event = event }
 			table.insert(status_root, transitionIndex, new_status)
-			assert(event.other)
+
 			event.other.status = new_status
 		else
 			local st = event.status
-
-			if st == nil then
-				error(
-					"PolyBool: Zero-length segment detected; your epsilon is probably too small or too large"
-				)
-			end
+			assert(st ~= nil, "zero-length segment detected")
 
 			local st_index = table.find(status_root, st)
 
@@ -458,8 +398,8 @@ local function calculate(
 			if not event.primary then
 				-- make sure `seg.my_fill` actually points to the primary polygon though
 				local s = event.seg.my_fill
-				assert(event.seg.other_fill)
-				event.seg.my_fill = event.seg.other_fill
+
+				event.seg.my_fill = (event.seg :: any).other_fill
 				event.seg.other_fill = s
 			end
 			table.insert(segments, event.seg)
@@ -473,7 +413,7 @@ local function calculate(
 end
 
 type Identity = {
-	event_root: { Event | Status },
+	event_root: { Event },
 	self_intersecting: boolean,
 }
 
@@ -481,7 +421,7 @@ local function constructor_intersector(self_intersecting: boolean): Identity
 	return {
 		self_intersecting = self_intersecting,
 
-		event_root = table.create(32) :: { Event | Status },
+		event_root = table.create(32) :: { Event },
 	}
 end
 

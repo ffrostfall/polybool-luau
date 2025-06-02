@@ -1,4 +1,4 @@
-export type Fill = { above: Segment?, below: Segment? }
+export type Fill = { above: boolean, below: boolean }
 
 export type Region = { vector }
 

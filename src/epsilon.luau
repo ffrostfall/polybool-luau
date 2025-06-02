@@ -11,11 +11,13 @@
 local EPSILON = 0.000001
 local NEG_EPSILON = -EPSILON
 
-local function point_above_or_on_line(point: vector, left: vector, right: vector): boolean
+local function point_above_or_on_line(point: vector, left: vector, right: vector): number
 	local left_x, left_y = left.x, left.y
 
-	return (right.x - left_x) * (point.y - left_y) - (right.y - left_y) * (point.x - left_x)
-		>= NEG_EPSILON
+	return if (right.x - left_x) * (point.y - left_y) - (right.y - left_y) * (point.x - left_x)
+			>= NEG_EPSILON
+		then 1
+		else -1
 end
 
 local function point_between(point: vector, left: vector, right: vector)
