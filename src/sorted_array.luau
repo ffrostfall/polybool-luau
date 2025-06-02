@@ -27,13 +27,13 @@ function sorted_array.insert_before<T>(array: { T }, node: T, check: (value: T) 
 
 	while lowerBound ~= upperBound do
 		local index: number = (lowerBound + upperBound) // 2
+		local checked = check(array[index])
 
-		if check(array[index]) then
+		upperBoundChecked = checked
+		if checked then
 			upperBound = index
-			upperBoundChecked = true
 		else
 			lowerBound = index + 1
-			upperBoundChecked = false
 		end
 	end
 

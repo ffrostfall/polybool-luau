@@ -12,24 +12,25 @@ local segment_selector = require("@self/segment_selector")
 local types = require("@self/types")
 
 local function segments(poly: types.Polygon): types.Segments
-	local i = intersector(true)
+	local i = intersector.constructor_intersector(true)
 
 	for _, reg in poly.regions do
-		i.add_region(reg)
+		intersector.add_region_to_intersector(i, reg)
 	end
 
 	return {
 		-- overload and im too lazy to deal with the type definitions
-		segments = i.calculate(poly.inverted :: any),
+		segments = intersector.calculate_self_intersector(i, poly.inverted),
 		inverted = poly.inverted,
 	}
 end
 
 local function combine(segments1: types.Segments, segments2: types.Segments): types.CombinedSegments
-	local i3 = intersector(false)
+	local i3 = intersector.constructor_intersector(false)
 
 	return {
-		combined = i3.calculate(
+		combined = intersector.calculate_non_self_intersector(
+			i3,
 			segments1.segments,
 			segments1.inverted,
 			segments2.segments,

@@ -472,69 +472,81 @@ local function calculate(
 	return segments
 end
 
--- selfIntersection is true/false depending on the phase of the overall algorithm
-local function intersector(self_intersection: boolean)
-	local event_root: { Event | Status } = {}
+type Identity = {
+	event_root: { Event | Status },
+	self_intersecting: boolean,
+}
 
-	local return_table = {}
+local function constructor_intersector(self_intersecting: boolean): Identity
+	return {
+		self_intersecting = self_intersecting,
 
-	-- return the appropriate API depending on what we're doing
-	if not self_intersection then
-		-- performing combination of polygons, so only deal with already-processed segments
-		function return_table.calculate(
-			segments1: { types.Segment },
-			inverted1: boolean,
-			segments2: { types.Segment },
-			inverted2: boolean
-		): { types.Segment }
-			-- segmentsX come from the self-intersection API, or this API
-			-- invertedX is whether we treat that list of segments as an inverted polygon or not
-			-- returns segments that can be used for further operations
-			for _, seg in segments1 do
-				event_add_segment(event_root, segment_copy(seg.start, seg.finish, seg), true)
-			end
-
-			for _, seg in segments2 do
-				event_add_segment(event_root, segment_copy(seg.start, seg.finish, seg), false)
-			end
-
-			return (calculate(inverted1, inverted2, event_root, self_intersection))
-		end
-
-		return return_table
-	end
-
-	function return_table.add_region(region: types.Region): ()
-		-- regions are a list of points:
-		--  [ [0, 0], [100, 0], [50, 100] ]
-		-- you can add multiple regions before running calculate
-
-		local point1: vector? = nil
-		local point2: vector = region[#region]
-
-		for _, point in region do
-			point1, point2 = point2, point
-
-			-- type state save me
-			local forward = epsilon.points_compare(point1 :: vector, point2)
-
-			if forward == 0 then -- points are equal, so we have a zero-length segment
-				continue -- just skip it
-			elseif forward < 0 then
-				event_add_segment(event_root, segment_new(point1 :: vector, point2), true)
-			else
-				event_add_segment(event_root, segment_new(point2, point1 :: vector), true)
-			end
-		end
-	end
-
-	function return_table.calculate(inverted: boolean)
-		-- is the polygon inverted?
-		-- returns segments
-		return (calculate(inverted, false, event_root, self_intersection))
-	end
-
-	return return_table
+		event_root = table.create(32) :: { Event | Status },
+	}
 end
 
-return intersector
+local function add_region_to_intersector(intersector: Identity, region: types.Region)
+	-- regions are a list of points:
+	--  [ [0, 0], [100, 0], [50, 100] ]
+	-- you can add multiple regions before running calculate
+
+	local point1: vector? = nil
+	local point2: vector = region[#region]
+
+	for _, point in region do
+		point1, point2 = point2, point
+
+		-- type state save me
+		local forward = epsilon.points_compare(point1 :: vector, point2)
+
+		if forward == 0 then -- points are equal, so we have a zero-length segment
+			continue -- just skip it
+		elseif forward < 0 then
+			event_add_segment(
+				intersector.event_root,
+				segment_new(point1 :: vector, point2),
+				true
+			)
+		else
+			event_add_segment(
+				intersector.event_root,
+				segment_new(point2, point1 :: vector),
+				true
+			)
+		end
+	end
+end
+
+local function calculate_self_intersector(intersector: Identity, inverted: boolean)
+	return (calculate(inverted, false, intersector.event_root, intersector.self_intersecting))
+end
+
+local function calculate_non_self_intersector(
+	intersector: Identity,
+	segments1: { types.Segment },
+	inverted1: boolean,
+	segments2: { types.Segment },
+	inverted2: boolean
+)
+	-- segmentsX come from the self-intersection API, or this API
+	-- invertedX is whether we treat that list of segments as an inverted polygon or not
+	-- returns segments that can be used for further operations
+	for _, seg in segments1 do
+		event_add_segment(intersector.event_root, segment_copy(seg.start, seg.finish, seg), true)
+	end
+
+	for _, seg in segments2 do
+		event_add_segment(intersector.event_root, segment_copy(seg.start, seg.finish, seg), false)
+	end
+
+	return (calculate(inverted1, inverted2, intersector.event_root, intersector.self_intersecting))
+end
+
+return {
+	constructor_intersector = constructor_intersector,
+
+	calculate_non_self_intersector = calculate_non_self_intersector,
+	calculate_self_intersector = calculate_self_intersector,
+
+	add_region_to_intersector = add_region_to_intersector,
+}
