@@ -76,7 +76,7 @@ local function lines_intersect(
 	a1: vector,
 	b0: vector,
 	b1: vector
-): { point: vector, along_a: number, along_b: number } | false
+): (vector?, number?, number?)
 	-- returns false if the lines are coincident (e.g., parallel or on top of each other)
 	--
 	-- returns an object if the lines intersect:
@@ -102,7 +102,7 @@ local function lines_intersect(
 
 	local axb = adx * bdy - ady * bdx
 	if math.abs(axb) < EPSILON then
-		return false
+		return nil, nil, nil
 	end
 
 	local dx = a0.x - b0.x
@@ -111,38 +111,34 @@ local function lines_intersect(
 	local a = (bdx * dy - bdy * dx) / axb
 	local b = (adx * dy - ady * dx) / axb
 
-	local ret = {
-		along_a = 0,
-		along_b = 0,
-		point = vector.create(a0.x + a * adx, a0.y + a * ady),
-	}
+	local point, along_a, along_b = vector.create(a0.x + a * adx, a0.y + a * ady), 0, 0
 
 	-- categorize where intersection point is along A and B
 	if a <= -EPSILON then
-		ret.along_a = -2
+		along_a = -2
 	elseif a < EPSILON then
-		ret.along_a = -1
+		along_a = -1
 	elseif a - 1 <= -EPSILON then
-		ret.along_a = 0
+		along_a = 0
 	elseif a - 1 < EPSILON then
-		ret.along_a = 1
+		along_a = 1
 	else
-		ret.along_a = 2
+		along_a = 2
 	end
 
 	if b <= NEG_EPSILON then
-		ret.along_b = -2
+		along_b = -2
 	elseif b < EPSILON then
-		ret.along_b = -1
+		along_b = -1
 	elseif b - 1 <= NEG_EPSILON then
-		ret.along_b = 0
+		along_b = 0
 	elseif b - 1 < EPSILON then
-		ret.along_b = 1
+		along_b = 1
 	else
-		ret.along_b = 2
+		along_b = 2
 	end
 
-	return ret
+	return point, along_a, along_b
 end
 
 return {

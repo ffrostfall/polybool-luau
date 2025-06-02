@@ -151,9 +151,9 @@ local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event)
 	local b1 = seg2.start
 	local b2 = seg2.finish
 
-	local i = epsilon.lines_intersect(a1, a2, b1, b2)
+	local intersection_point, along_a, along_b = epsilon.lines_intersect(a1, a2, b1, b2)
 
-	if not i then
+	if not intersection_point then
 		-- segments are parallel or coincident
 
 		-- if points aren't collinear, then the segments are parallel, so no intersections
@@ -208,12 +208,11 @@ local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event)
 		-- otherwise, lines intersect at i.point, which may or may not be between the endpoints
 
 		-- is A divided between its endpoints? (exclusive)
-		local along_a, along_b = i.along_a, i.along_b
 		if along_a == 0 then
 			if along_b == -1 then -- yes, at exactly b1
 				event_divide(event_root, ev1, b1)
 			elseif along_b == 0 then -- yes, somewhere between B's endpoints
-				event_divide(event_root, ev1, i.point)
+				event_divide(event_root, ev1, intersection_point)
 			elseif along_b == 1 then -- yes, at exactly b2
 				event_divide(event_root, ev1, b2)
 			end
@@ -221,7 +220,7 @@ local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event)
 			if along_a == -1 then -- yes, at exactly a1
 				event_divide(event_root, ev2, a1)
 			elseif along_a == 0 then -- yes, somewhere between A's endpoints (exclusive)
-				event_divide(event_root, ev2, i.point)
+				event_divide(event_root, ev2, intersection_point)
 			elseif along_a == 1 then -- yes, at exactly a2
 				event_divide(event_root, ev2, a2)
 			end
