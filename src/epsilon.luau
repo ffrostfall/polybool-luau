@@ -9,12 +9,13 @@
 -- zero is defined to be between (-epsilon, epsilon) exclusive
 --
 local EPSILON = 0.000001
+local NEG_EPSILON = -EPSILON
 
 local function point_above_or_on_line(point: vector, left: vector, right: vector): boolean
 	local left_x, left_y = left.x, left.y
 
 	return (right.x - left_x) * (point.y - left_y) - (right.y - left_y) * (point.x - left_x)
-		>= -EPSILON
+		>= NEG_EPSILON
 end
 
 local function point_between(point: vector, left: vector, right: vector)
@@ -26,20 +27,22 @@ local function point_between(point: vector, left: vector, right: vector)
 	local d_ry_ly = right.y - left.y
 
 	local dot = d_px_lx * d_rx_lx + d_py_ly * d_ry_ly
+	local sqlen = d_rx_lx * d_rx_lx + d_ry_ly * d_ry_ly
 	-- if `dot` is 0, then `p` == `left` or `left` == `right` (reject)
 	-- if `dot` is less than 0, then `p` is to the left of `left` (reject)
-	if dot < EPSILON then
-		return false
-	end
+	-- if dot < EPSILON then
+	-- return false
+	-- end
 
-	local sqlen = d_rx_lx * d_rx_lx + d_ry_ly * d_ry_ly
 	-- if `dot` > `sqlen`, then `p` is to the right of `right` (reject)
 	-- therefore, if `dot - sqlen` is greater than 0, then `p` is to the right of `right` (reject)
-	if dot - sqlen > -EPSILON then
-		return false
-	end
+	-- if dot - sqlen > -EPSILON then
+	-- return false
+	-- end
 
-	return true
+	return not ((dot < EPSILON) or (dot - sqlen > NEG_EPSILON))
+
+	-- return true
 end
 
 local function points_same(p1: vector, p2: vector): boolean
@@ -47,9 +50,7 @@ local function points_same(p1: vector, p2: vector): boolean
 end
 
 local function points_compare(point1: vector, point2: vector): number
-	local magnitude = vector.magnitude(point1 - point2)
-
-	if magnitude <= EPSILON then
+	if vector.magnitude(point1 - point2) <= EPSILON then
 		return 0
 	end
 
@@ -64,12 +65,8 @@ local function points_collinear(pt1: vector, pt2: vector, pt3: vector)
 	-- does pt1->pt2->pt3 make a straight line?
 	-- essentially this is just checking to see if the slope(pt1->pt2) === slope(pt2->pt3)
 	-- if slopes are equal, then they must be collinear, because they share pt2
-	local dx1 = pt1.x - pt2.x
-	local dy1 = pt1.y - pt2.y
-	local dx2 = pt2.x - pt3.x
-	local dy2 = pt2.y - pt3.y
-
-	return math.abs(dx1 * dy2 - dx2 * dy1) < EPSILON
+	return math.abs((pt1.x - pt2.x) * (pt2.y - pt3.y) - (pt2.x - pt3.x) * (pt1.y - pt2.y))
+		< EPSILON
 end
 
 local function lines_intersect(
@@ -131,11 +128,11 @@ local function lines_intersect(
 		ret.along_a = 2
 	end
 
-	if b <= -EPSILON then
+	if b <= NEG_EPSILON then
 		ret.along_b = -2
 	elseif b < EPSILON then
 		ret.along_b = -1
-	elseif b - 1 <= -EPSILON then
+	elseif b - 1 <= NEG_EPSILON then
 		ret.along_b = 0
 	elseif b - 1 < EPSILON then
 		ret.along_b = 1
@@ -147,6 +144,8 @@ local function lines_intersect(
 end
 
 return {
+	value = EPSILON,
+
 	lines_intersect = lines_intersect,
 	points_collinear = points_collinear,
 	point_above_or_on_line = point_above_or_on_line,
