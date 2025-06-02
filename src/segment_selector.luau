@@ -62,14 +62,14 @@ local function selector_func(segments: { types.Segment }, selection: { number })
 	local result = {}
 
 	for _, seg in segments do
-		local other_fill = seg.other_fill
-		local my_fill = seg.my_fill
+		local other_filled = seg.other_filled
 
-		local index =
-			selection[(if my_fill.above then 8 else 0) + (if my_fill.below then 4 else 0) + (if other_fill
-					and other_fill.above
-				then 2
-				else 0) + (if other_fill and other_fill.below then 1 else 0) + 1]
+		local index = selection[(if seg.my_fill_above then 8 else 0) + (if seg.my_fill_below
+			then 4
+			else 0) + (if other_filled and seg.other_filled_above then 2 else 0) + (if other_filled
+				and seg.other_filled_below
+			then 1
+			else 0) + 1]
 
 		if index == 0 then
 			continue
@@ -79,9 +79,9 @@ local function selector_func(segments: { types.Segment }, selection: { number })
 		local cloned = table.clone(SEGMENT_TEMPLATE)
 
 		cloned.start = seg.start
-		cloned.finish = seg.finish;
-		(cloned.my_fill :: any).above = index == 1
-		(cloned.my_fill :: any).below = index == 2
+		cloned.finish = seg.finish
+		cloned.my_fill_above = index == 1
+		cloned.my_fill_below = index == 2
 
 		table.insert(result, cloned)
 	end

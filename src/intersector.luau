@@ -24,34 +24,18 @@ type Event = {
 	status: Status?,
 }
 
-local function segment_new(start: vector, finish: vector): types.Segment
-	return {
-		start = start,
-		finish = finish,
-		my_fill = {
-			above = false, -- is there fill above us?
-			below = false, -- is there fill below us?
-		},
-		other_fill = nil,
-	}
-end
+local TEMPLATE: types.Segment = {
+	start = vector.zero,
+	finish = vector.zero,
+	my_fill_above = false,
+	my_fill_below = false,
+	other_filled = false,
+}
 
-local function segment_copy(
-	start: vector,
-	finish: vector,
-	above: boolean,
-	below: boolean
-): types.Segment
-	return {
-		start = start,
-		finish = finish,
-		my_fill_above = above,
-		my_fill_below = below,
-		my_fill = {
-			above = above,
-			below = below,
-		},
-	}
+local function segment_new(start: vector, finish: vector): types.Segment
+	local cloned = table.clone(TEMPLATE)
+	cloned.start, cloned.finish = start, finish
+	return cloned
 end
 
 local function event_compare(
@@ -151,10 +135,10 @@ local function event_update_end(event_root: { Event }, event: Event, finish: vec
 end
 
 local function event_divide(event_root: { Event }, event: Event, point: vector)
-	local ns =
-		segment_copy(point, event.seg.finish, event.seg.my_fill_above, event.seg.my_fill_below)
+	local cloned = table.clone(event.seg)
+	cloned.other_filled, cloned.start = false, point
 	event_update_end(event_root, event, point)
-	return (event_add_segment(event_root, ns, event.primary))
+	return (event_add_segment(event_root, cloned, event.primary))
 end
 
 local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event): Event?
@@ -173,14 +157,14 @@ local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event)
 		-- segments are parallel or coincident
 
 		-- if points aren't collinear, then the segments are parallel, so no intersections
-		if not epsilon.points_collinear(a1, a2, b1) then
-			return
+		if
+			(not epsilon.points_collinear(a1, a2, b1))
+			or epsilon.points_same(a1, b2)
+			or epsilon.points_same(a2, b1)
+		then
+			return nil
 		end
 		-- otherwise, segments are on top of each other somehow (aka coincident)
-
-		if epsilon.points_same(a1, b2) or epsilon.points_same(a2, b1) then
-			return -- segments touch at endpoints... no intersection
-		end
 
 		local a1_equ_b1 = epsilon.points_same(a1, b1)
 		local a2_equ_b2 = epsilon.points_same(a2, b2)
@@ -243,6 +227,8 @@ local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event)
 			end
 		end
 	end
+
+	return nil
 end
 
 local function find_event_comparison(here: Status, event: Event): boolean
@@ -276,6 +262,7 @@ local function calculate(
 	local segments = table.create(32) :: { types.Segment }
 	while event_root[1] ~= nil do
 		local event: Event = event_root[1]
+		local seg = event.seg
 
 		if event.is_start then
 			local transitionIndex =
@@ -295,20 +282,23 @@ local function calculate(
 
 				-- merge event.seg's fill information into eve.seg
 
-				local eve_seg, my_fill = eve.seg, event.seg.my_fill
+				local eve_seg = eve.seg
 
 				if self_intersection then
 					-- merge two segments that belong to the same polygon
 					-- think of this as sandwiching two segments together, where `eve.seg` is
 					-- the bottom -- this will cause the above fill flag to toggle
 					-- This might break things
-					eve_seg.my_fill.above = my_fill.below or my_fill.above == my_fill.below
+					eve_seg.my_fill_above = seg.my_fill_below
+						or seg.my_fill_above == seg.my_fill_below
 				else
 					-- merge two segments that belong to different polygons
 					-- each segment has distinct knowledge, so no special logic is needed
 					-- note that this can only happen once per segment in this phase, because we
 					-- are guaranteed that all self-intersections are gone
-					eve_seg.other_fill = my_fill
+					eve_seg.other_filled = true
+					eve_seg.other_filled_above = seg.my_fill_above
+					eve_seg.other_filled_below = seg.my_fill_below
 				end
 
 				table.remove(event_root, table.find(event_root, event.other))
@@ -323,37 +313,35 @@ local function calculate(
 
 			-- calculate fill flags
 			if self_intersection then
-				local my_fill = event.seg.my_fill
-
 				-- next, calculate whether we are filled below us
 				if not below then -- if nothing is below us...
 					-- we are filled below us if the polygon is inverted
-					my_fill.below = primary_poly_inverted
+					seg.my_fill_below = primary_poly_inverted
 				else
 					-- otherwise, we know the answer -- it's the same if whatever is below
 					-- us is filled above it
-					my_fill.below = below.seg.my_fill.above
+					seg.my_fill_below = below.seg.my_fill_above
 				end
 
 				-- since now we know if we're filled below us, we can calculate whether
 				-- we're filled above us by applying toggle to whatever is below us
-				my_fill.above = if my_fill.below or my_fill.above == my_fill.below
-					then not my_fill.below
-					else my_fill.below
-			elseif not event.seg.other_fill then
+				seg.my_fill_above = if seg.my_fill_below
+						or seg.my_fill_above == seg.my_fill_below
+					then not seg.my_fill_below
+					else seg.my_fill_below
+			elseif not seg.other_filled then
 				-- if we don't have other information, then we need to figure out if we're
 				-- inside the other polygon
 				local inside = below
 					and (
 						if event.primary == below.primary
-							then below.seg.other_fill.above
-							else below.seg.my_fill.above
+							then below.seg.other_filled_above
+							else below.seg.my_fill_above
 					)
 
-				event.seg.other_fill = {
-					above = inside,
-					below = inside,
-				}
+				seg.other_filled = true :: any
+				seg.other_filled_above = inside
+				seg.other_filled_below = inside
 			end
 
 			-- insert the status and remember it for later removal
@@ -384,12 +372,15 @@ local function calculate(
 			-- save the segment for reporting
 			if not event.primary then
 				-- make sure `seg.my_fill` actually points to the primary polygon though
-				local s = event.seg.my_fill
+				-- Flips the fill
+				local stored_above, stored_below = seg.my_fill_above, seg.my_fill_below
 
-				event.seg.my_fill = (event.seg :: any).other_fill
-				event.seg.other_fill = s
+				seg.my_fill_above = seg.other_filled_above :: any
+				seg.my_fill_below = seg.other_filled_below :: any
+
+				seg.other_filled_above, seg.other_filled_below = stored_above, stored_below
 			end
-			table.insert(segments, event.seg)
+			table.insert(segments, seg)
 		end
 
 		-- remove the event and continue
@@ -459,19 +450,15 @@ local function calculate_non_self_intersector(
 	-- invertedX is whether we treat that list of segments as an inverted polygon or not
 	-- returns segments that can be used for further operations
 	for _, seg in segments1 do
-		event_add_segment(
-			intersector.event_root,
-			segment_copy(seg.start, seg.finish, seg.my_fill.above, seg.my_fill.below),
-			true
-		)
+		local cloned = table.clone(seg)
+		cloned.other_filled = false
+		event_add_segment(intersector.event_root, cloned, true)
 	end
 
 	for _, seg in segments2 do
-		event_add_segment(
-			intersector.event_root,
-			segment_copy(seg.start, seg.finish, seg.my_fill.above, seg.my_fill.below),
-			false
-		)
+		local cloned = table.clone(seg)
+		cloned.other_filled = false
+		event_add_segment(intersector.event_root, cloned, false)
 	end
 
 	return (calculate(inverted1, inverted2, intersector.event_root, intersector.self_intersecting))
