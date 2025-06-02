@@ -4,6 +4,7 @@
 		"polybool": "src/",
 		"tests": "tests/",
 		"vendor": "vendor/",
-		"lute": "~/.lute/typedefs/0.1.0"
+		"lute": "~/.lute/typedefs/0.1.0",
+		"lune": "~/.lune/.typedefs/0.9.3/"
 	}
 }

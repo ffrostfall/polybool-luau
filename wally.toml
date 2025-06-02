@@ -3,5 +3,23 @@ name = "ffrostfall/polybool"
 version = "0.1.0"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
+exclude = [
+	".github",
+	".vscode",
+	"tests",
+	"types",
+	"vendor",
+	".gitattributes",
+	".gitignore",
+	".styluaignore",
+	"test.svg",
+	"profile.out",
+	"README.md",
+	"roblox-tests.project.json",
+	"rokit.toml",
+	"sourcemap.json",
+	"stylua.toml",
+	"docs",
+]
 
 [dependencies]
