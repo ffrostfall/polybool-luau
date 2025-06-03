@@ -17,6 +17,8 @@ for i = #lines, 1, -1 do
 		table.remove(lines, i)
 	elseif string.match(line, "require") then
 		table.remove(lines, i)
+	elseif not string.match(line, "xpcall") then
+		table.remove(lines, i)
 	end
 end
 
