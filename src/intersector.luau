@@ -20,14 +20,13 @@ local table_remove = table.remove
 local table_find = table.find
 local table_insert = table.insert
 
-type Status = { Event }
 type Event = {
 	is_start: boolean,
 	point: vector,
 	seg: types.Segment,
 	primary: boolean,
 	other: Event?,
-	status: Status?,
+	status: Event?,
 }
 
 local TEMPLATE: types.Segment = {
@@ -44,11 +43,35 @@ local function segment_new(start: vector, finish: vector): types.Segment
 	return cloned
 end
 
+local function points_collinear(pt1: vector, pt2: vector, pt3: vector)
+	-- does pt1->pt2->pt3 make a straight line?
+	-- essentially this is just checking to see if the slope(pt1->pt2) === slope(pt2->pt3)
+	-- if slopes are equal, then they must be collinear, because they share pt2
+	return math.abs((pt1.x - pt2.x) * (pt2.y - pt3.y) - (pt2.x - pt3.x) * (pt1.y - pt2.y))
+		< EPSILON
+end
+
 local function point_above_or_on_line(point: vector, left: vector, right: vector): boolean
 	local left_x, left_y = left.x, left.y
 
 	return (right.x - left_x) * (point.y - left_y) - (right.y - left_y) * (point.x - left_x)
 		>= -EPSILON
+end
+
+local function points_compare(point1: vector, point2: vector): number
+	if vector.magnitude(point1 - point2) <= EPSILON then
+		return 0
+	end
+
+	if math.abs(point1.x - point2.x) < EPSILON then
+		return if point1.y < point2.y then -1 else 1
+	end
+
+	return if point1.x < point2.x then -1 else 1
+end
+
+local function points_same(p1: vector, p2: vector): boolean
+	return vector.magnitude(p1 - p2) < EPSILON
 end
 
 local function event_compare(
@@ -62,10 +85,10 @@ local function event_compare(
 	local p2_2 = (iter_event.other :: any).point
 
 	-- compare the selected points first
-	local comp = epsilon.points_compare(p1_1, p2_1)
+	local comp = points_compare(p1_1, p2_1)
 	if comp ~= 0 then
 		return comp < 0 -- the selected points are the same
-	elseif epsilon.points_same(p1_2, p2_2) then -- if the non-selected points are the same too...
+	elseif vector.magnitude(p1_1 - p2_2) < EPSILON then -- if the non-selected points are the same too...
 		return false
 	elseif p1_is_start ~= p2_is_start then -- if one is a start and the other isn't...
 		-- favor the one that isn't the start
@@ -139,7 +162,6 @@ end
 
 local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event): Event?
 	-- returns the segment equal to ev1, or false if nothing equal
-
 	local seg1 = ev1.seg
 	local seg2 = ev2.seg
 	local a1 = seg1.start
@@ -153,13 +175,13 @@ local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event)
 		-- segments are parallel or coincident
 
 		-- if points aren't collinear, then the segments are parallel, so no intersections
-		if (not epsilon.points_collinear(a1, a2, b1)) or epsilon.points_same(a1, b2) then
+		if (not points_collinear(a1, a2, b1)) or points_same(a1, b2) then
 			return nil
 		end
 		-- otherwise, segments are on top of each other somehow (aka coincident)
 
-		local a1_equ_b1 = epsilon.points_same(a1, b1)
-		local a2_equ_b2 = epsilon.points_same(a2, b2)
+		local a1_equ_b1 = points_same(a1, b1)
+		local a2_equ_b2 = points_same(a2, b2)
 
 		if a1_equ_b1 and a2_equ_b2 then
 			return ev2 -- segments are exactly equal
@@ -221,16 +243,16 @@ local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event)
 	return nil
 end
 
-local function find_event_comparison(here: Status, event: Event): boolean
-	local ev1_seg, ev2_seg = event.seg, here[1].seg
+local function find_event_comparison(here: Event, event: Event): boolean
+	local ev1_seg, ev2_seg = event.seg, here.seg
 	local a1 = ev1_seg.start
 	local b1 = ev2_seg.start
 	local b2 = ev2_seg.finish
 
-	if epsilon.points_collinear(a1, b1, b2) then
+	if points_collinear(a1, b1, b2) then
 		local a2 = ev1_seg.finish
 
-		return epsilon.points_collinear(a2, b1, b2) or point_above_or_on_line(a2, b1, b2)
+		return points_collinear(a2, b1, b2) or point_above_or_on_line(a2, b1, b2)
 	end
 
 	return (point_above_or_on_line(a1, b1, b2))
@@ -245,23 +267,20 @@ local function calculate(
 	-- if selfIntersection is true then there is no secondary polygon, so that isn't used
 
 	-- status logic
-	local status_root: { Status } = table.create(16) :: { Status }
+	local status_root: { Event } = table.create(16) :: { Event }
 
 	-- main event loop
 	local segments = table.create(32) :: { types.Segment }
-	while event_root[1] ~= nil do
+	while event_root[1] do
 		local event: Event = event_root[1]
 		local seg = event.seg
 
 		if event.is_start then
-			local transitionIndex =
+			local transition_index =
 				sorted_array.find_transition(status_root, find_event_comparison, event)
 
-			local transition_before = status_root[transitionIndex - 1]
-			local transition_after = status_root[transitionIndex]
-
-			local above: Event? = transition_before and transition_before[1]
-			local below: Event? = transition_after and transition_after[1]
+			local above = status_root[transition_index - 1]
+			local below = status_root[transition_index]
 
 			local eve = (above and check_intersection(event_root, event, above))
 				or (below and check_intersection(event_root, event, below))
@@ -334,23 +353,20 @@ local function calculate(
 			end
 
 			-- insert the status and remember it for later removal
-			local new_status = { event }
-			table_insert(status_root, transitionIndex, new_status)
+			table_insert(status_root, transition_index, event)
 
-			event.other.status = new_status
+			event.other.status = event
 		else
-			local st = event.status
-			assert(st ~= nil, "zero-length segment detected")
-
-			local st_index = table_find(status_root, st)
+			local st_index = table_find(status_root, event.status)
+			assert(st_index, "zero-length segment detected")
 
 			-- removing the status will create two new adjacent edges, so we'll need to check
 			-- for those
 			if st_index and st_index > 1 and st_index < #status_root then
 				check_intersection(
 					event_root,
-					status_root[st_index - 1][1],
-					status_root[st_index + 1][1]
+					status_root[st_index - 1],
+					status_root[st_index + 1]
 				)
 			end
 
@@ -403,7 +419,7 @@ local function add_region_to_intersector(intersector: Identity, region: types.Re
 		point1, point2 = point2, point
 
 		-- type state save me
-		local forward = epsilon.points_compare(point1 :: vector, point2)
+		local forward = points_compare(point1 :: vector, point2)
 
 		if forward == 0 then -- points are equal, so we have a zero-length segment
 			continue -- just skip it

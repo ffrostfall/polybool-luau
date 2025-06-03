@@ -21,7 +21,18 @@ type Match = {
 	matches_pt1: boolean,
 }
 
-local epsilon_points_same = epsilon.points_same
+local EPSILON = 0.0001
+local function points_same(p1: vector, p2: vector): boolean
+	return vector.magnitude(p1 - p2) < EPSILON
+end
+
+local function points_collinear(pt1: vector, pt2: vector, pt3: vector)
+	-- does pt1->pt2->pt3 make a straight line?
+	-- essentially this is just checking to see if the slope(pt1->pt2) === slope(pt2->pt3)
+	-- if slopes are equal, then they must be collinear, because they share pt2
+	return math.abs((pt1.x - pt2.x) * (pt2.y - pt3.y) - (pt2.x - pt3.x) * (pt1.y - pt2.y))
+		< EPSILON
+end
 
 local function new_match(): Match
 	return table.clone(MATCH_TEMPLATE)
@@ -53,7 +64,7 @@ local function segment_chainer(segments: { types.Segment }): { types.Region }
 
 	for _, seg in segments do
 		local point1, point2 = seg.start, seg.finish
-		assert(not epsilon.points_same(point1, point2), "zero-length segment")
+		assert(not points_same(point1, point2), "zero-length segment")
 
 		-- search for two chains that this segment matches
 		local first_match: Match = new_match()
@@ -79,19 +90,19 @@ local function segment_chainer(segments: { types.Segment }): { types.Region }
 			local head = chain[1]
 			local tail = chain[#chain]
 
-			if epsilon_points_same(head, point1) then
+			if points_same(head, point1) then
 				if set_match(index, true, true) then
 					break
 				end
-			elseif epsilon_points_same(head, point2) then
+			elseif points_same(head, point2) then
 				if set_match(index, true, false) then
 					break
 				end
-			elseif epsilon_points_same(tail, point1) then
+			elseif points_same(tail, point1) then
 				if set_match(index, false, true) then
 					break
 				end
-			elseif epsilon_points_same(tail, point2) then
+			elseif points_same(tail, point2) then
 				if set_match(index, false, false) then
 					break
 				end
@@ -121,7 +132,7 @@ local function segment_chainer(segments: { types.Segment }): { types.Region }
 			local oppo = if addToHead then chain[chain_length] else chain[1]
 			local oppo2 = if addToHead then chain[chain_length - 1] else chain[2]
 
-			if epsilon.points_collinear(grow2, grow, pt) then
+			if points_collinear(grow2, grow, pt) then
 				-- grow isn't needed because it's directly between grow2 and pt:
 				-- grow2 ---grow---> pt
 				if addToHead then
@@ -133,11 +144,11 @@ local function segment_chainer(segments: { types.Segment }): { types.Region }
 				grow = grow2 -- old grow is gone... new grow is what grow2 was
 			end
 
-			if epsilon_points_same(oppo, pt) then
+			if points_same(oppo, pt) then
 				-- we're closing the loop, so remove chain from chains
 				table.remove(chains, index)
 
-				if epsilon.points_collinear(oppo2, oppo, grow) then
+				if points_collinear(oppo2, oppo, grow) then
 					-- oppo isn't needed because it's directly between oppo2 and grow:
 					-- oppo2 ---oppo--->grow
 					if addToHead then
@@ -177,14 +188,14 @@ local function segment_chainer(segments: { types.Segment }): { types.Region }
 			local head = chain2[1]
 			local head2 = chain2[2]
 
-			if epsilon.points_collinear(tail2, tail, head) then
+			if points_collinear(tail2, tail, head) then
 				-- tail isn't needed because it's directly between tail2 and head
 				-- tail2 ---tail---> head
 				table.remove(chain1)
 				tail = tail2 -- old tail is gone... new tail is what tail2 was
 			end
 
-			if epsilon.points_collinear(tail, head, head2) then
+			if points_collinear(tail, head, head2) then
 				-- head isn't needed because it's directly between tail and head2
 				-- tail ---head---> head2
 				table.remove(chain2, 1)

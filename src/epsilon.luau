@@ -38,34 +38,6 @@ local function point_between(point: vector, left: vector, right: vector)
 	-- return true
 end
 
-local function points_same(p1: vector, p2: vector): boolean
-	return vector.magnitude(p1 - p2) < EPSILON
-end
-
---[[
-	returns false if point1 is smaller
-	returns true if point1 is bigger
-]]
-local function points_compare(point1: vector, point2: vector): number
-	if vector.magnitude(point1 - point2) <= EPSILON then
-		return 0
-	end
-
-	if math.abs(point1.x - point2.x) < EPSILON then
-		return if point1.y < point2.y then -1 else 1
-	end
-
-	return if point1.x < point2.x then -1 else 1
-end
-
-local function points_collinear(pt1: vector, pt2: vector, pt3: vector)
-	-- does pt1->pt2->pt3 make a straight line?
-	-- essentially this is just checking to see if the slope(pt1->pt2) === slope(pt2->pt3)
-	-- if slopes are equal, then they must be collinear, because they share pt2
-	return math.abs((pt1.x - pt2.x) * (pt2.y - pt3.y) - (pt2.x - pt3.x) * (pt1.y - pt2.y))
-		< EPSILON
-end
-
 local function lines_intersect(
 	a0: vector,
 	a1: vector,
@@ -140,9 +112,5 @@ return {
 	value = EPSILON,
 
 	lines_intersect = lines_intersect,
-	points_collinear = points_collinear,
-	points_same = points_same,
 	point_between = point_between,
-
-	points_compare = points_compare,
 }
