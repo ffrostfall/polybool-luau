@@ -22,33 +22,26 @@ function sorted_array.insert_before<T, U...>(
 
 	if length < 1 then
 		array[1] = node
-		return node
+		return
 	end
 
-	local lowerBound: number = 1
-	local upperBound: number = length
+	local low: number = 1
+	local high: number = length
 
-	local upperBoundChecked: boolean = false
-
-	while lowerBound ~= upperBound do
-		local index: number = (lowerBound + upperBound) // 2
-		local checked = check(array[index], ...)
-
-		upperBoundChecked = checked
-		if checked then
-			upperBound = index
+	while high > low do
+		local index: number = bit32.rshift(low + high, 1)
+		if check(array[index], ...) then
+			high = index
 		else
-			lowerBound = index + 1
+			low = index + 1
 		end
 	end
 
-	if upperBoundChecked or check(array[upperBound], ...) then
-		table.insert(array, upperBound, node)
+	if check(array[high], ...) then
+		table.insert(array, high, node)
 	else
 		table.insert(array, node)
 	end
-
-	return node
 end
 
 function sorted_array.find_transition<T, U...>(
@@ -62,26 +55,20 @@ function sorted_array.find_transition<T, U...>(
 		return 1
 	end
 
-	local lowerBound: number = 1
-	local upperBound: number = length
+	local low: number = 1
+	local high: number = length
 
-	local upperBoundChecked: boolean = false
-
-	while lowerBound ~= upperBound do
-		local index: number = (lowerBound + upperBound) // 2
-		local checked = check(array[index], ...)
-
-		if checked then
-			upperBound = index
+	while high > low do
+		local index: number = bit32.rshift(low + high, 1)
+		if check(array[index], ...) then
+			high = index
 		else
-			lowerBound = index + 1
+			low = index + 1
 		end
-
-		upperBoundChecked = checked
 	end
 
-	if upperBoundChecked or check(array[upperBound], ...) then
-		return upperBound
+	if check(array[high], ...) then
+		return high
 	else
 		return length + 1
 	end
