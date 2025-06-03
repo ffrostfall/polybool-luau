@@ -11,15 +11,6 @@
 local EPSILON = 0.000001
 local NEG_EPSILON = -EPSILON
 
-local function point_above_or_on_line(point: vector, left: vector, right: vector): number
-	local left_x, left_y = left.x, left.y
-
-	return if (right.x - left_x) * (point.y - left_y) - (right.y - left_y) * (point.x - left_x)
-			>= NEG_EPSILON
-		then 1
-		else -1
-end
-
 local function point_between(point: vector, left: vector, right: vector)
 	-- p must be collinear with left->right
 	-- returns false if p == left, p == right, or left == right
@@ -51,6 +42,10 @@ local function points_same(p1: vector, p2: vector): boolean
 	return vector.magnitude(p1 - p2) < EPSILON
 end
 
+--[[
+	returns false if point1 is smaller
+	returns true if point1 is bigger
+]]
 local function points_compare(point1: vector, point2: vector): number
 	if vector.magnitude(point1 - point2) <= EPSILON then
 		return 0
@@ -146,7 +141,6 @@ return {
 
 	lines_intersect = lines_intersect,
 	points_collinear = points_collinear,
-	point_above_or_on_line = point_above_or_on_line,
 	points_same = points_same,
 	point_between = point_between,
 

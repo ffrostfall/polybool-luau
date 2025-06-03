@@ -14,6 +14,12 @@ local epsilon = require("./epsilon")
 local sorted_array = require("./sorted_array")
 local types = require("./types")
 
+local EPSILON = 0.0001
+
+local table_remove = table.remove
+local table_find = table.find
+local table_insert = table.insert
+
 type Status = { Event }
 type Event = {
 	is_start: boolean,
@@ -38,6 +44,13 @@ local function segment_new(start: vector, finish: vector): types.Segment
 	return cloned
 end
 
+local function point_above_or_on_line(point: vector, left: vector, right: vector): boolean
+	local left_x, left_y = left.x, left.y
+
+	return (right.x - left_x) * (point.y - left_y) - (right.y - left_y) * (point.x - left_x)
+		>= -EPSILON
+end
+
 local function event_compare(
 	iter_event: Event,
 	p1_is_start: boolean,
@@ -51,36 +64,18 @@ local function event_compare(
 	-- compare the selected points first
 	local comp = epsilon.points_compare(p1_1, p2_1)
 	if comp ~= 0 then
-		return comp < 0
-	end
-	-- the selected points are the same
-
-	if epsilon.points_same(p1_2, p2_2) then -- if the non-selected points are the same too...
+		return comp < 0 -- the selected points are the same
+	elseif epsilon.points_same(p1_2, p2_2) then -- if the non-selected points are the same too...
 		return false
-	end
-
-	if p1_is_start ~= p2_is_start then -- if one is a start and the other isn't...
+	elseif p1_is_start ~= p2_is_start then -- if one is a start and the other isn't...
 		-- favor the one that isn't the start
 		return not p1_is_start
 	end
 
 	-- otherwise, we'll have to calculate which one is below the other manually
-	return (
-		if p2_is_start
-			then epsilon.point_above_or_on_line(p1_2, p2_1, p2_2)
-			else epsilon.point_above_or_on_line(p1_2, p2_2, p2_1)
-	) < 0
-end
-
-local function event_add(event_root: { Event }, event: Event, other_pt: vector)
-	sorted_array.insert_before(
-		event_root,
-		event,
-		event_compare,
-		event.is_start,
-		event.point,
-		other_pt
-	)
+	return not if p2_is_start
+		then point_above_or_on_line(p1_2, p2_1, p2_2)
+		else point_above_or_on_line(p1_2, p2_2, p2_1)
 end
 
 local function event_add_segment_start(
@@ -96,49 +91,50 @@ local function event_add_segment_start(
 		other = nil,
 		status = nil,
 	}
-	event_add(event_root, ev_start, seg.finish)
+
+	sorted_array.insert_before(event_root, ev_start, event_compare, true, seg.start, seg.finish)
+
 	return ev_start
 end
 
-local function event_add_segment_end(
-	event_root: { Event },
-	ev_start: Event,
-	seg: types.Segment,
-	primary: boolean
-)
+local function event_add_segment(event_root: { Event }, seg: types.Segment, primary: boolean)
+	local event = event_add_segment_start(event_root, seg, primary)
+
 	local ev_end: Event = {
 		is_start = false,
 		point = seg.finish,
 		seg = seg,
 		primary = primary,
-		other = ev_start,
-		status = nil,
+		other = event,
 	}
-	ev_start.other = ev_end
-	event_add(event_root, ev_end, ev_start.point)
-end
 
-local function event_add_segment(event_root: { Event }, seg: types.Segment, primary: boolean)
-	local ev_start = event_add_segment_start(event_root, seg, primary)
-	event_add_segment_end(event_root, ev_start, seg, primary)
-	return ev_start
+	event.other = ev_end
+	sorted_array.insert_before(event_root, ev_end, event_compare, false, seg.finish, event.point)
 end
 
 local function event_update_end(event_root: { Event }, event: Event, finish: vector)
 	-- slides an finish backwards
 	--   (start)------------(finish)    to:
 	--   (start)---(finish)
-	table.remove(event_root, table.find(event_root, event.other))
+	table_remove(event_root, table_find(event_root, event.other))
 	event.seg.finish = finish
 	event.other.point = finish
-	event_add(event_root, event.other, event.point)
+
+	sorted_array.insert_before(
+		event_root,
+		event.other,
+		event_compare,
+		event.other.is_start,
+		finish,
+		event.point
+	)
 end
 
 local function event_divide(event_root: { Event }, event: Event, point: vector)
 	local cloned = table.clone(event.seg)
 	cloned.other_filled, cloned.start = false, point
 	event_update_end(event_root, event, point)
-	return (event_add_segment(event_root, cloned, event.primary))
+	event_add_segment(event_root, cloned, event.primary)
 end
 
 local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event): Event?
@@ -157,11 +153,7 @@ local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event)
 		-- segments are parallel or coincident
 
 		-- if points aren't collinear, then the segments are parallel, so no intersections
-		if
-			(not epsilon.points_collinear(a1, a2, b1))
-			or epsilon.points_same(a1, b2)
-			or epsilon.points_same(a2, b1)
-		then
+		if (not epsilon.points_collinear(a1, a2, b1)) or epsilon.points_same(a1, b2) then
 			return nil
 		end
 		-- otherwise, segments are on top of each other somehow (aka coincident)
@@ -204,9 +196,7 @@ local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event)
 			--  (b1)----------(b2)
 			event_divide(event_root, ev2, a1)
 		end
-	else
-		-- otherwise, lines intersect at i.point, which may or may not be between the endpoints
-
+	else -- otherwise, lines intersect at i.point, which may or may not be between the endpoints
 		-- is A divided between its endpoints? (exclusive)
 		if along_a == 0 then
 			if along_b == -1 then -- yes, at exactly b1
@@ -219,8 +209,9 @@ local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event)
 		elseif along_b == 0 then
 			if along_a == -1 then -- yes, at exactly a1
 				event_divide(event_root, ev2, a1)
-			elseif along_a == 0 then -- yes, somewhere between A's endpoints (exclusive)
-				event_divide(event_root, ev2, intersection_point)
+			-- elseif along_a == 0 then -- yes, somewhere between A's endpoints (exclusive)
+			-- 	-- This never gets hit
+			-- 	event_divide(event_root, ev2, intersection_point)
 			elseif along_a == 1 then -- yes, at exactly a2
 				event_divide(event_root, ev2, a2)
 			end
@@ -239,11 +230,10 @@ local function find_event_comparison(here: Status, event: Event): boolean
 	if epsilon.points_collinear(a1, b1, b2) then
 		local a2 = ev1_seg.finish
 
-		return epsilon.points_collinear(a2, b1, b2)
-			or epsilon.point_above_or_on_line(a2, b1, b2) > 0
+		return epsilon.points_collinear(a2, b1, b2) or point_above_or_on_line(a2, b1, b2)
 	end
 
-	return (epsilon.point_above_or_on_line(a1, b1, b2)) > 0
+	return (point_above_or_on_line(a1, b1, b2))
 end
 
 local function calculate(
@@ -300,8 +290,8 @@ local function calculate(
 					eve_seg.other_filled_below = seg.my_fill_below
 				end
 
-				table.remove(event_root, table.find(event_root, event.other))
-				table.remove(event_root, table.find(event_root, event))
+				table_remove(event_root, table_find(event_root, event.other))
+				table_remove(event_root, table_find(event_root, event))
 			end
 
 			if event_root[1] ~= event then
@@ -345,14 +335,14 @@ local function calculate(
 
 			-- insert the status and remember it for later removal
 			local new_status = { event }
-			table.insert(status_root, transitionIndex, new_status)
+			table_insert(status_root, transitionIndex, new_status)
 
 			event.other.status = new_status
 		else
 			local st = event.status
 			assert(st ~= nil, "zero-length segment detected")
 
-			local st_index = table.find(status_root, st)
+			local st_index = table_find(status_root, st)
 
 			-- removing the status will create two new adjacent edges, so we'll need to check
 			-- for those
@@ -365,25 +355,24 @@ local function calculate(
 			end
 
 			-- remove the status
-			table.remove(status_root, st_index)
+			table_remove(status_root, st_index)
 
 			-- if we've reached this point, we've calculated everything there is to know, so
 			-- save the segment for reporting
 			if not event.primary then
 				-- make sure `seg.my_fill` actually points to the primary polygon though
 				-- Flips the fill
-				local stored_above, stored_below = seg.my_fill_above, seg.my_fill_below
-
-				seg.my_fill_above = seg.other_filled_above :: any
-				seg.my_fill_below = seg.other_filled_below :: any
-
-				seg.other_filled_above, seg.other_filled_below = stored_above, stored_below
+				seg.my_fill_above, seg.other_filled_above =
+					seg.other_filled_above, seg.my_fill_above
+				seg.my_fill_below, seg.other_filled_below =
+					seg.other_filled_below, seg.my_fill_below
 			end
-			table.insert(segments, seg)
+
+			table_insert(segments, seg)
 		end
 
 		-- remove the event and continue
-		table.remove(event_root, 1)
+		table_remove(event_root, 1)
 	end
 
 	return segments
