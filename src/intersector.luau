@@ -537,13 +537,13 @@ local function calculate_non_self_intersector(
 	-- invertedX is whether we treat that list of segments as an inverted polygon or not
 	-- returns segments that can be used for further operations
 	for _, seg in segments1 do
-		local cloned = table.clone(seg)
+		local cloned = seg
 		cloned.other_filled = false
 		event_add_segment(cloned, true)
 	end
 
 	for _, seg in segments2 do
-		local cloned = table.clone(seg)
+		local cloned = seg
 		cloned.other_filled = false
 		event_add_segment(cloned, false)
 	end
