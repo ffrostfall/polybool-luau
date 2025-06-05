@@ -11,14 +11,16 @@
 ]]
 
 local epsilon = require("./epsilon")
-local sorted_array = require("./sorted_array")
 local types = require("./types")
 
 local EPSILON = 0.0001
+local NEG_EPSILON = -0.0001
 
 local table_remove = table.remove
 local table_find = table.find
-local table_insert = table.insert
+local table_clone = table.clone
+
+local current_event_root: { Event } = table.create(32, nil :: any)
 
 type Event = {
 	is_start: boolean,
@@ -35,10 +37,12 @@ local TEMPLATE: types.Segment = {
 	my_fill_above = false,
 	my_fill_below = false,
 	other_filled = false,
+	-- other_filled_above = false,
+	-- other_filled_below = false,
 }
 
 local function segment_new(start: vector, finish: vector): types.Segment
-	local cloned = table.clone(TEMPLATE)
+	local cloned = table_clone(TEMPLATE)
 	cloned.start, cloned.finish = start, finish
 	return cloned
 end
@@ -56,6 +60,18 @@ local function point_above_or_on_line(point: vector, left: vector, right: vector
 
 	return (right.x - left_x) * (point.y - left_y) - (right.y - left_y) * (point.x - left_x)
 		>= -EPSILON
+end
+
+local function point_between(point: vector, left: vector, right: vector): boolean
+	local d_py_ly = point.y - left.y
+	local d_rx_lx = right.x - left.x
+	local d_px_lx = point.x - left.x
+	local d_ry_ly = right.y - left.y
+
+	local dot = (d_px_lx * d_rx_lx) + (d_py_ly * d_ry_ly)
+	local sqlen = (d_rx_lx * d_rx_lx) + (d_ry_ly * d_ry_ly)
+
+	return not ((dot < EPSILON) or (dot - sqlen > NEG_EPSILON))
 end
 
 local function points_compare(point1: vector, point2: vector): number
@@ -101,148 +117,6 @@ local function event_compare(
 		else point_above_or_on_line(p1_2, p2_2, p2_1)
 end
 
-local function event_add_segment_start(
-	event_root: { Event },
-	seg: types.Segment,
-	primary: boolean
-): Event
-	local ev_start: Event = {
-		is_start = true,
-		point = seg.start,
-		seg = seg,
-		primary = primary,
-		other = nil,
-		status = nil,
-	}
-
-	sorted_array.insert_before(event_root, ev_start, event_compare, true, seg.start, seg.finish)
-
-	return ev_start
-end
-
-local function event_add_segment(event_root: { Event }, seg: types.Segment, primary: boolean)
-	local event = event_add_segment_start(event_root, seg, primary)
-
-	local ev_end: Event = {
-		is_start = false,
-		point = seg.finish,
-		seg = seg,
-		primary = primary,
-		other = event,
-	}
-
-	event.other = ev_end
-	sorted_array.insert_before(event_root, ev_end, event_compare, false, seg.finish, event.point)
-end
-
-local function event_update_end(event_root: { Event }, event: Event, finish: vector)
-	-- slides an finish backwards
-	--   (start)------------(finish)    to:
-	--   (start)---(finish)
-	table_remove(event_root, table_find(event_root, event.other))
-	event.seg.finish = finish
-	event.other.point = finish
-
-	sorted_array.insert_before(
-		event_root,
-		event.other,
-		event_compare,
-		event.other.is_start,
-		finish,
-		event.point
-	)
-end
-
-local function event_divide(event_root: { Event }, event: Event, point: vector)
-	local cloned = table.clone(event.seg)
-	cloned.other_filled, cloned.start = false, point
-	event_update_end(event_root, event, point)
-	event_add_segment(event_root, cloned, event.primary)
-end
-
-local function check_intersection(event_root: { Event }, ev1: Event, ev2: Event): Event?
-	-- returns the segment equal to ev1, or false if nothing equal
-	local seg1 = ev1.seg
-	local seg2 = ev2.seg
-	local a1 = seg1.start
-	local a2 = seg1.finish
-	local b1 = seg2.start
-	local b2 = seg2.finish
-
-	local intersection_point, along_a, along_b = epsilon.lines_intersect(a1, a2, b1, b2)
-
-	if not intersection_point then
-		-- segments are parallel or coincident
-
-		-- if points aren't collinear, then the segments are parallel, so no intersections
-		if (not points_collinear(a1, a2, b1)) or points_same(a1, b2) then
-			return nil
-		end
-		-- otherwise, segments are on top of each other somehow (aka coincident)
-
-		local a1_equ_b1 = points_same(a1, b1)
-		local a2_equ_b2 = points_same(a2, b2)
-
-		if a1_equ_b1 and a2_equ_b2 then
-			return ev2 -- segments are exactly equal
-		end
-
-		local a2_between = not a2_equ_b2 and epsilon.point_between(a2, b1, b2)
-
-		if a1_equ_b1 then
-			if a2_between then
-				--  (a1)---(a2)
-				--  (b1)----------(b2)
-				event_divide(event_root, ev2, a2)
-			else
-				--  (a1)----------(a2)
-				--  (b1)---(b2)
-				event_divide(event_root, ev1, b2)
-			end
-			return ev2
-		elseif not a1_equ_b1 and epsilon.point_between(a1, b1, b2) then
-			if not a2_equ_b2 then
-				-- make a2 equal to b2
-				if a2_between then
-					--         (a1)---(a2)
-					--  (b1)-----------------(b2)
-					event_divide(event_root, ev2, a2)
-				else
-					--         (a1)----------(a2)
-					--  (b1)----------(b2)
-					event_divide(event_root, ev1, b2)
-				end
-			end
-
-			--         (a1)---(a2)
-			--  (b1)----------(b2)
-			event_divide(event_root, ev2, a1)
-		end
-	else -- otherwise, lines intersect at i.point, which may or may not be between the endpoints
-		-- is A divided between its endpoints? (exclusive)
-		if along_a == 0 then
-			if along_b == -1 then -- yes, at exactly b1
-				event_divide(event_root, ev1, b1)
-			elseif along_b == 0 then -- yes, somewhere between B's endpoints
-				event_divide(event_root, ev1, intersection_point)
-			elseif along_b == 1 then -- yes, at exactly b2
-				event_divide(event_root, ev1, b2)
-			end
-		elseif along_b == 0 then
-			if along_a == -1 then -- yes, at exactly a1
-				event_divide(event_root, ev2, a1)
-			-- elseif along_a == 0 then -- yes, somewhere between A's endpoints (exclusive)
-			-- 	-- This never gets hit
-			-- 	event_divide(event_root, ev2, intersection_point)
-			elseif along_a == 1 then -- yes, at exactly a2
-				event_divide(event_root, ev2, a2)
-			end
-		end
-	end
-
-	return nil
-end
-
 local function find_event_comparison(here: Event, event: Event): boolean
 	local ev1_seg, ev2_seg = event.seg, here.seg
 	local a1 = ev1_seg.start
@@ -258,10 +132,222 @@ local function find_event_comparison(here: Event, event: Event): boolean
 	return (point_above_or_on_line(a1, b1, b2))
 end
 
+local function custom_table_insert<T>(array: { T }, at: number, value: T)
+	local len = #array
+
+	for i = len + 1, at, -1 do
+		array[i + 1] = array[i]
+	end
+
+	array[at] = value
+end
+
+local function event_root_insert_before<U...>(
+	node: Event,
+	p1_is_start: boolean,
+	p1_1: vector,
+	p1_2: vector
+)
+	local length: number = #current_event_root
+
+	if length < 1 then
+		current_event_root[1] = node
+		return
+	end
+
+	local low: number = 1
+	local high: number = length
+
+	while high > low do
+		local index: number = bit32.rshift(low + high, 1)
+		if event_compare(current_event_root[index], p1_is_start, p1_1, p1_2) then
+			high = index
+		else
+			low = index + 1
+		end
+	end
+
+	if event_compare(current_event_root[high], p1_is_start, p1_1, p1_2) then
+		custom_table_insert(current_event_root, high, node)
+	else
+		current_event_root[length + 1] = node
+	end
+end
+
+local function status_array_find_transition(array: { Event }, other_event: Event): number
+	local length = #array
+
+	if length < 1 then
+		return 1
+	end
+
+	local low: number = 1
+	local high: number = length
+
+	while high > low do
+		local index: number = bit32.rshift(low + high, 1)
+		if find_event_comparison(array[index], other_event) then
+			high = index
+		else
+			low = index + 1
+		end
+	end
+
+	if find_event_comparison(array[high], other_event) then
+		return high
+	else
+		return length + 1
+	end
+end
+
+local function event_add_segment_start(seg: types.Segment, primary: boolean): Event
+	local ev_start: Event = {
+		is_start = true,
+		point = seg.start,
+		seg = seg,
+		primary = primary,
+		other = nil,
+		status = nil,
+	}
+
+	event_root_insert_before(ev_start, true, seg.start, seg.finish)
+
+	return ev_start
+end
+
+local TEMPLATEAB = {
+	is_start = false,
+	point = vector.zero,
+	seg = {},
+	primary = false,
+	other = {},
+}
+
+local function event_add_segment(seg: types.Segment, primary: boolean)
+	local event = event_add_segment_start(seg, primary)
+
+	local ev_end = table_clone(TEMPLATEAB)
+	ev_end.point = seg.finish
+	ev_end.seg = seg
+	ev_end.primary = primary
+	ev_end.other = event
+	-- local ev_end: Event = {
+	-- 	is_start = false,
+	-- 	point = seg.finish,
+	-- 	seg = seg,
+	-- 	primary = primary,
+	-- 	other = event,
+	-- }
+
+	event.other = ev_end
+	event_root_insert_before(ev_end, false, seg.finish, event.point)
+end
+
+local function event_update_end(event: Event, finish: vector)
+	-- slides an finish backwards
+	--   (start)------------(finish)    to:
+	--   (start)---(finish)
+	table_remove(current_event_root, table_find(current_event_root, event.other))
+	event.seg.finish = finish
+	event.other.point = finish
+
+	event_root_insert_before(event.other, event.other.is_start, finish, event.point)
+end
+
+local function event_divide(event: Event, point: vector)
+	local cloned = table_clone(event.seg)
+	cloned.other_filled, cloned.start = false, point
+	event_update_end(event, point)
+	event_add_segment(cloned, event.primary)
+end
+
+local function check_intersection(ev1: Event, ev2: Event): Event?
+	-- returns the segment equal to ev1, or false if nothing equal
+	local seg1: types.Segment = ev1.seg
+	local seg2: types.Segment = ev2.seg
+	local a1: vector = seg1.start
+	local a2: vector = seg1.finish
+	local b1: vector = seg2.start
+	local b2: vector = seg2.finish
+
+	local intersection_point: vector?, along_a: number?, along_b: number? =
+		epsilon.lines_intersect(a1, a2, b1, b2)
+
+	if not intersection_point then
+		-- segments are parallel or coincident
+
+		-- if points aren't collinear, then the segments are parallel, so no intersections
+		if (not points_collinear(a1, a2, b1)) or points_same(a1, b2) then
+			return nil
+		end
+		-- otherwise, segments are on top of each other somehow (aka coincident)
+
+		local a1_equ_b1: boolean = points_same(a1, b1)
+		local a2_equ_b2: boolean = points_same(a2, b2)
+
+		if a1_equ_b1 and a2_equ_b2 then
+			return ev2 -- segments are exactly equal
+		end
+
+		local a2_between: boolean = not a2_equ_b2 and point_between(a2, b1, b2)
+
+		if a1_equ_b1 then
+			if a2_between then
+				--  (a1)---(a2)
+				--  (b1)----------(b2)
+				event_divide(ev2, a2)
+			else
+				--  (a1)----------(a2)
+				--  (b1)---(b2)
+				event_divide(ev1, b2)
+			end
+			return ev2
+		elseif not a1_equ_b1 and point_between(a1, b1, b2) then
+			if not a2_equ_b2 then
+				-- make a2 equal to b2
+				if a2_between then
+					--         (a1)---(a2)
+					--  (b1)-----------------(b2)
+					event_divide(ev2, a2)
+				else
+					--         (a1)----------(a2)
+					--  (b1)----------(b2)
+					event_divide(ev1, b2)
+				end
+			end
+
+			--         (a1)---(a2)
+			--  (b1)----------(b2)
+			event_divide(ev2, a1)
+		end
+	else -- otherwise, lines intersect at i.point, which may or may not be between the endpoints
+		-- is A divided between its endpoints? (exclusive)
+		if along_a == 0 then
+			if along_b == -1 then -- yes, at exactly b1
+				event_divide(ev1, b1)
+			elseif along_b == 0 then -- yes, somewhere between B's endpoints
+				event_divide(ev1, intersection_point)
+			elseif along_b == 1 then -- yes, at exactly b2
+				event_divide(ev1, b2)
+			end
+		elseif along_b == 0 then
+			if along_a == -1 then -- yes, at exactly a1
+				event_divide(ev2, a1)
+			-- elseif along_a == 0 then -- yes, somewhere between A's endpoints (exclusive)
+			-- 	-- This never gets hit
+			-- 	event_divide(event_root, ev2, intersection_point)
+			elseif along_a == 1 then -- yes, at exactly a2
+				event_divide(ev2, a2)
+			end
+		end
+	end
+
+	return nil
+end
+
 local function calculate(
 	primary_poly_inverted: boolean,
 	secondary_poly_inverted: boolean,
-	event_root: { Event },
 	self_intersection: boolean
 ): { types.Segment }
 	-- if selfIntersection is true then there is no secondary polygon, so that isn't used
@@ -271,19 +357,20 @@ local function calculate(
 
 	-- main event loop
 	local segments = table.create(32) :: { types.Segment }
-	while event_root[1] do
-		local event: Event = event_root[1]
+	while current_event_root[1] do
+		local event: Event = current_event_root[1]
 		local seg = event.seg
 
 		if event.is_start then
-			local transition_index =
-				sorted_array.find_transition(status_root, find_event_comparison, event)
+			local transition_index = status_array_find_transition(status_root, event)
 
 			local above = status_root[transition_index - 1]
 			local below = status_root[transition_index]
 
-			local eve = (above and check_intersection(event_root, event, above))
-				or (below and check_intersection(event_root, event, below))
+			local eve = (above and check_intersection(event, above))
+				or (below and check_intersection(event, below))
+
+			-- This is not a bottleneck, it only runs when we're doing operations
 			if eve then
 				-- event and eve are equal
 				-- we'll keep eve and throw away event
@@ -309,11 +396,11 @@ local function calculate(
 					eve_seg.other_filled_below = seg.my_fill_below
 				end
 
-				table_remove(event_root, table_find(event_root, event.other))
-				table_remove(event_root, table_find(event_root, event))
+				table_remove(current_event_root, table_find(current_event_root, event.other))
+				table_remove(current_event_root, table_find(current_event_root, event))
 			end
 
-			if event_root[1] ~= event then
+			if current_event_root[1] ~= event then
 				-- something was inserted before us in the event queue, so loop back around and
 				-- process it before continuing
 				continue
@@ -353,7 +440,7 @@ local function calculate(
 			end
 
 			-- insert the status and remember it for later removal
-			table_insert(status_root, transition_index, event)
+			custom_table_insert(status_root, transition_index, event)
 
 			event.other.status = event
 		else
@@ -363,11 +450,7 @@ local function calculate(
 			-- removing the status will create two new adjacent edges, so we'll need to check
 			-- for those
 			if st_index and st_index > 1 and st_index < #status_root then
-				check_intersection(
-					event_root,
-					status_root[st_index - 1],
-					status_root[st_index + 1]
-				)
+				check_intersection(status_root[st_index - 1], status_root[st_index + 1])
 			end
 
 			-- remove the status
@@ -384,11 +467,15 @@ local function calculate(
 					seg.other_filled_below, seg.my_fill_below
 			end
 
-			table_insert(segments, seg)
+			segments[#segments + 1] = seg
+			-- table_insert(segments, seg)
 		end
 
 		-- remove the event and continue
-		table_remove(event_root, 1)
+		local len = #current_event_root
+		for i = 1, len do
+			current_event_root[i] = current_event_root[i + 1]
+		end
 	end
 
 	return segments
@@ -411,6 +498,7 @@ local function add_region_to_intersector(intersector: Identity, region: types.Re
 	-- regions are a list of points:
 	--  [ [0, 0], [100, 0], [50, 100] ]
 	-- you can add multiple regions before running calculate
+	current_event_root = intersector.event_root
 
 	local point1: vector? = nil
 	local point2: vector = region[#region]
@@ -424,23 +512,16 @@ local function add_region_to_intersector(intersector: Identity, region: types.Re
 		if forward == 0 then -- points are equal, so we have a zero-length segment
 			continue -- just skip it
 		elseif forward < 0 then
-			event_add_segment(
-				intersector.event_root,
-				segment_new(point1 :: vector, point2),
-				true
-			)
+			event_add_segment(segment_new(point1 :: vector, point2), true)
 		else
-			event_add_segment(
-				intersector.event_root,
-				segment_new(point2, point1 :: vector),
-				true
-			)
+			event_add_segment(segment_new(point2, point1 :: vector), true)
 		end
 	end
 end
 
 local function calculate_self_intersector(intersector: Identity, inverted: boolean)
-	return (calculate(inverted, false, intersector.event_root, intersector.self_intersecting))
+	current_event_root = intersector.event_root
+	return (calculate(inverted, false, intersector.self_intersecting))
 end
 
 local function calculate_non_self_intersector(
@@ -450,22 +531,24 @@ local function calculate_non_self_intersector(
 	segments2: { types.Segment },
 	inverted2: boolean
 )
+	current_event_root = intersector.event_root
+
 	-- segmentsX come from the self-intersection API, or this API
 	-- invertedX is whether we treat that list of segments as an inverted polygon or not
 	-- returns segments that can be used for further operations
 	for _, seg in segments1 do
 		local cloned = table.clone(seg)
 		cloned.other_filled = false
-		event_add_segment(intersector.event_root, cloned, true)
+		event_add_segment(cloned, true)
 	end
 
 	for _, seg in segments2 do
 		local cloned = table.clone(seg)
 		cloned.other_filled = false
-		event_add_segment(intersector.event_root, cloned, false)
+		event_add_segment(cloned, false)
 	end
 
-	return (calculate(inverted1, inverted2, intersector.event_root, intersector.self_intersecting))
+	return (calculate(inverted1, inverted2, intersector.self_intersecting))
 end
 
 return {
