@@ -1,3 +1,5 @@
+--!optimize 2
+--!native
 --[[
 	Adapted from PolyBool (github.com/voidqk/polybooljs) under the MIT license.
 	(c) 2016 Sean Connelly (@voidqk)

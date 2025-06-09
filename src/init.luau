@@ -1,3 +1,5 @@
+--!optimize 2
+--!native
 --[[
  * @copyright 2016 Sean Connelly (@voidqk), http://syntheti.cc
  * @license MIT
